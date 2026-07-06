@@ -1,75 +1,238 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import type { PromptType } from "../../backend/types";
-import { prompts, queryPrompts } from "../../backend/store";
+import fs from "fs";
+import path from "path";
+
+type Prompt = {
+  id: string;
+  type: string;
+  model: string;
+  vendor?: string;
+  tags: string[];
+  language: string;
+  title: string;
+  content: string;
+  contentEn: string;
+  contentZh: string;
+  status: string;
+  visibility: string;
+  isFeatured?: boolean;
+  viewCount: number;
+  copyCount: number;
+  ratingAvg: number;
+  ratingCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const dataDir = path.join(process.cwd(), "api", "data");
+
+function loadPrompts(): Prompt[] {
+  try {
+    const raw = fs.readFileSync(path.join(dataDir, "prompts.json"), "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+function loadStats() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dataDir, "stats.json"), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function loadFilters() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dataDir, "filters.json"), "utf8"));
+  } catch {
+    return { models: [], tags: [] };
+  }
+}
+
+function ok(res: VercelResponse, data: unknown) {
+  return res.status(200).json({ success: true, data });
+}
+
+function fail(res: VercelResponse, status: number, error: string) {
+  return res.status(status).json({ success: false, error });
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
-    const { method, url } = req;
-    const { q, type, model, tag, sort = "latest", page = 1, pageSize = 12 } = req.query;
+    const { method } = req;
+    const pathParts = (req.query.path as string[] | undefined) || [];
+    const first = pathParts[0];
 
     if (method === "GET") {
-      if (url?.endsWith("/stats")) {
-        const total = prompts.filter(p => p.status === "published" && p.visibility === "public").length;
-        const image = prompts.filter(p => p.type === "image" && p.status === "published" && p.visibility === "public").length;
-        const video = prompts.filter(p => p.type === "video" && p.status === "published" && p.visibility === "public").length;
-        const task = prompts.filter(p => p.type === "task" && p.status === "published" && p.visibility === "public").length;
-        return res.status(200).json({ success: true, data: { total, image, video, task, last7Days: 38, users: 4, pendingSubmissions: 2, sources: 6, activeSources: 5 } });
-      }
-
-      if (url?.endsWith("/filters")) {
-        const modelMap = new Map<string, number>();
-        const tagMap = new Map<string, number>();
-        prompts.filter(p => p.status === "published" && p.visibility === "public").forEach(p => {
-          modelMap.set(p.model, (modelMap.get(p.model) || 0) + 1);
-          p.tags.forEach(t => tagMap.set(t, (tagMap.get(t) || 0) + 1));
+      // /prompts/stats
+      if (first === "stats") {
+        const stats = loadStats();
+        if (stats) return ok(res, stats);
+        const prompts = loadPrompts();
+        const pub = prompts.filter((p) => p.status === "published" && p.visibility === "public");
+        return ok(res, {
+          total: pub.length,
+          image: pub.filter((p) => p.type === "image").length,
+          video: pub.filter((p) => p.type === "video").length,
+          task: pub.filter((p) => p.type === "task").length,
+          last7Days: 38,
+          users: 4,
+          pendingSubmissions: 2,
+          sources: 6,
+          activeSources: 5,
         });
-        const models = Array.from(modelMap.entries()).map(([name, count]) => ({
-          name,
-          vendor: name.includes("midjourney") ? "Midjourney" : name.includes("flux") ? "Black Forest Labs" : name.includes("stable") ? "Stability AI" : name.includes("dall") ? "OpenAI" : name.includes("gpt") ? "OpenAI" : name.includes("claude") ? "Anthropic" : name.includes("gemini") ? "Google" : name.includes("sora") ? "OpenAI" : "Unknown",
-          type: name.includes("sora") || name.includes("kling") || name.includes("runway") || name.includes("jimeng") || name.includes("pika") || name.includes("hailuo") ? "video" : name.includes("gpt") || name.includes("claude") || name.includes("gemini") || name.includes("deepseek") ? "task" : "image",
-          count
-        }));
-        const tags = Array.from(tagMap.entries()).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
-        return res.status(200).json({ success: true, data: { models, tags } });
       }
 
-      if (url?.endsWith("/daily")) {
-        const daily = prompts.filter(p => p.status === "published" && p.visibility === "public" && p.isFeatured).slice(0, 8);
-        return res.status(200).json({ success: true, data: daily });
+      // /prompts/filters
+      if (first === "filters") {
+        return ok(res, loadFilters());
       }
 
-      if (url?.endsWith("/trending")) {
-        const trending = [...prompts.filter(p => p.status === "published" && p.visibility === "public")].sort((a, b) => (b.viewCount + b.copyCount * 2) - (a.viewCount + a.copyCount * 2)).slice(0, 8);
-        return res.status(200).json({ success: true, data: trending });
+      // /prompts/daily
+      if (first === "daily") {
+        const prompts = loadPrompts();
+        const daily = prompts
+          .filter((p) => p.status === "published" && p.visibility === "public" && p.isFeatured)
+          .slice(0, 8);
+        return ok(res, daily);
       }
 
-      if (url?.endsWith("/latest")) {
-        const latest = [...prompts.filter(p => p.status === "published" && p.visibility === "public")].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 8);
-        return res.status(200).json({ success: true, data: latest });
+      // /prompts/trending
+      if (first === "trending") {
+        const prompts = loadPrompts();
+        const trending = [...prompts.filter((p) => p.status === "published" && p.visibility === "public")]
+          .sort((a, b) => b.viewCount + b.copyCount * 2 - (a.viewCount + a.copyCount * 2))
+          .slice(0, 8);
+        return ok(res, trending);
       }
 
-      const pathParts = req.query.path as string[] || [];
-      const lastPart = pathParts[pathParts.length - 1];
-      if (lastPart && !lastPart.includes(".")) {
-        const prompt = prompts.find(p => p.id === lastPart && p.status === "published" && p.visibility === "public");
-        if (prompt) return res.status(200).json({ success: true, data: prompt });
+      // /prompts/latest
+      if (first === "latest") {
+        const prompts = loadPrompts();
+        const latest = [...prompts.filter((p) => p.status === "published" && p.visibility === "public")]
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .slice(0, 8);
+        return ok(res, latest);
       }
 
-      const data = queryPrompts({
-        q: typeof q === "string" ? q : "",
-        type: (typeof type === "string" ? type : "") as PromptType,
-        model: typeof model === "string" ? model : "",
-        tag: typeof tag === "string" ? tag : "",
-        sort: (typeof sort === "string" ? sort : "latest") as "latest" | "trending" | "rating" | "random",
-        page: Number(page),
-        pageSize: Number(pageSize),
+      // /prompts/:id/related
+      if (first && pathParts.length === 2 && pathParts[1] === "related") {
+        const prompts = loadPrompts();
+        const target = prompts.find((p) => p.id === first);
+        if (!target) return fail(res, 404, "Not found");
+        const related = prompts
+          .filter(
+            (p) =>
+              p.id !== target.id &&
+              p.status === "published" &&
+              p.visibility === "public",
+          )
+          .map((p) => ({
+            p,
+            score:
+              (p.type === target.type ? 2 : 0) +
+              (p.model === target.model ? 3 : 0) +
+              p.tags.filter((t) => target.tags.includes(t)).length * 2,
+          }))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 4)
+          .map((x) => x.p);
+        return ok(res, related);
+      }
+
+      // /prompts/:id/comments
+      if (first && pathParts.length === 2 && pathParts[1] === "comments") {
+        // 静态数据无评论，返回空数组
+        return ok(res, []);
+      }
+
+      // /prompts/:id
+      if (first && pathParts.length === 1) {
+        const prompts = loadPrompts();
+        const prompt = prompts.find(
+          (p) => p.id === first && p.status === "published" && p.visibility === "public",
+        );
+        if (prompt) return ok(res, prompt);
+        return fail(res, 404, "Prompt not found");
+      }
+
+      // /prompts (列表)
+      const prompts = loadPrompts();
+      const { q, type, model, tag, sort = "latest", page = "1", pageSize = "12", featured, language, authorId, projectId } = req.query;
+
+      let list = prompts.filter((p) => p.status === "published" && p.visibility === "public");
+
+      if (featured === "true") list = list.filter((p) => p.isFeatured);
+      if (typeof type === "string" && type) list = list.filter((p) => p.type === type);
+      if (typeof model === "string" && model) list = list.filter((p) => p.model === model);
+      if (typeof tag === "string" && tag) list = list.filter((p) => p.tags.includes(tag));
+      if (typeof language === "string" && language) list = list.filter((p) => p.language === language);
+      if (typeof authorId === "string" && authorId) list = list.filter((p) => (p as any).userId === authorId);
+      if (typeof projectId === "string" && projectId) list = list.filter((p) => (p as any).projectId === projectId);
+      if (typeof q === "string" && q) {
+        const kw = q.toLowerCase();
+        list = list.filter(
+          (p) =>
+            p.title.toLowerCase().includes(kw) ||
+            p.contentEn.toLowerCase().includes(kw) ||
+            p.contentZh.toLowerCase().includes(kw) ||
+            p.tags.some((t) => t.toLowerCase().includes(kw)) ||
+            p.model.toLowerCase().includes(kw),
+        );
+      }
+
+      const s = typeof sort === "string" ? sort : "latest";
+      if (s === "latest") {
+        list = [...list].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      } else if (s === "trending") {
+        list = [...list].sort((a, b) => b.viewCount + b.copyCount * 3 - (a.viewCount + a.copyCount * 3));
+      } else if (s === "rating") {
+        list = [...list].sort((a, b) => b.ratingAvg - a.ratingAvg);
+      } else if (s === "random") {
+        list = [...list].sort(() => Math.random() - 0.5);
+      }
+
+      const total = list.length;
+      const pageNum = Number(page) || 1;
+      const pageSizeNum = Number(pageSize) || 12;
+      const start = (pageNum - 1) * pageSizeNum;
+      const data = list.slice(start, start + pageSizeNum);
+
+      return ok(res, {
+        data,
+        total,
+        page: pageNum,
+        pageSize: pageSizeNum,
+        hasMore: start + pageSizeNum < total,
       });
-      return res.status(200).json({ success: true, data });
     }
 
-    return res.status(405).json({ success: false, error: "Method not allowed" });
+    if (method === "POST") {
+      // /prompts/:id/copy
+      if (first && pathParts.length === 2 && pathParts[1] === "copy") {
+        return ok(res, { copyCount: 1 });
+      }
+      // /prompts/:id/rate
+      if (first && pathParts.length === 2 && pathParts[1] === "rate") {
+        return ok(res, { ok: true });
+      }
+      // /prompts/:id/comments
+      if (first && pathParts.length === 2 && pathParts[1] === "comments") {
+        return ok(res, {
+          id: `c_${Date.now()}`,
+          promptId: first,
+          user: { id: "guest", username: "游客", role: "user" },
+          content: typeof req.body === "object" ? req.body.content : "",
+          createdAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    return fail(res, 405, "Method not allowed");
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ success: false, error: "Internal server error" });
+    console.error("prompts API error:", error);
+    return fail(res, 500, "Internal server error");
   }
 }

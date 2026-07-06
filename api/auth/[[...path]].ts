@@ -1,57 +1,98 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import type { User } from "../../backend/types";
-import { users, smsCodes, sessions } from "../../backend/store";
+import fs from "fs";
+import path from "path";
+
+type User = {
+  id: string;
+  username: string;
+  email?: string;
+  phone?: string;
+  passwordHash?: string;
+  role: string;
+  avatar?: string;
+  createdAt: string;
+};
+
+const dataDir = path.join(process.cwd(), "api", "data");
+
+// 内存态（仅单实例内有效）
+const sessions: Record<string, { userId: string; createdAt: string }> = {};
+const smsCodes: Record<string, string> = {};
+
+function loadUsers(): User[] {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(dataDir, "users.json"), "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+// 单实例内可变的用户表
+let usersCache: User[] | null = null;
+function getUsers(): User[] {
+  if (!usersCache) usersCache = loadUsers();
+  return usersCache;
+}
+
+function ok(res: VercelResponse, data: unknown) {
+  return res.status(200).json({ success: true, data });
+}
+function fail(res: VercelResponse, status: number, error: string) {
+  return res.status(status).json({ success: false, error });
+}
+function publicUser(u: User) {
+  return { id: u.id, username: u.username, email: u.email, phone: u.phone, avatar: u.avatar ?? "", role: u.role, createdAt: u.createdAt };
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
-    const { method, url } = req;
+    const { method } = req;
+    const pathParts = (req.query.path as string[] | undefined) || [];
+    const action = pathParts[0];
 
     if (method === "POST") {
-      if (url?.endsWith("/login")) {
-        const { account, password } = req.body;
-        const user = users.find(u => (u.email === account || u.phone === account) && u.passwordHash === password);
-        if (!user) return res.status(401).json({ success: false, error: "账号或密码错误" });
-        
+      if (action === "login") {
+        const { account, password } = req.body || {};
+        const user = getUsers().find(
+          (u) => (u.email === account || u.phone === account) && u.passwordHash === password,
+        );
+        if (!user) return fail(res, 401, "账号或密码错误");
         const token = `token_${Math.random().toString(36).slice(2, 20)}`;
         sessions[token] = { userId: user.id, createdAt: new Date().toISOString() };
-        
-        return res.status(200).json({ success: true, data: { token, user: { id: user.id, username: user.username, avatar: user.avatar, role: user.role } } });
+        return ok(res, { token, user: publicUser(user) });
       }
 
-      if (url?.endsWith("/login-sms")) {
-        const { phone, code } = req.body;
-        if (smsCodes[phone] !== code) return res.status(401).json({ success: false, error: "验证码错误" });
-        
-        let user = users.find(u => u.phone === phone);
+      if (action === "login-sms") {
+        const { phone, code } = req.body || {};
+        if (smsCodes[phone] !== code) return fail(res, 401, "验证码错误");
+        let user = getUsers().find((u) => u.phone === phone);
         if (!user) {
           user = {
             id: `u_${Math.random().toString(36).slice(2, 10)}`,
-            username: `用户${phone.slice(-4)}`,
+            username: `用户${(phone || "").slice(-4)}`,
             phone,
             role: "user",
             passwordHash: "",
+            avatar: "",
             createdAt: new Date().toISOString(),
           };
-          users.push(user);
+          getUsers().push(user);
         }
-        
         const token = `token_${Math.random().toString(36).slice(2, 20)}`;
         sessions[token] = { userId: user.id, createdAt: new Date().toISOString() };
-        
-        return res.status(200).json({ success: true, data: { token, user: { id: user.id, username: user.username, avatar: user.avatar, role: user.role } } });
+        return ok(res, { token, user: publicUser(user) });
       }
 
-      if (url?.endsWith("/send-code")) {
-        const { phone } = req.body;
+      if (action === "send-code") {
+        const { phone } = req.body || {};
         smsCodes[phone] = "1234";
-        return res.status(200).json({ success: true, data: { phone, hint: "验证码已发送，演示验证码为 1234" } });
+        return ok(res, { phone, hint: "验证码已发送，演示验证码为 1234" });
       }
 
-      if (url?.endsWith("/register")) {
-        const { email, phone, username, password } = req.body;
-        const exists = users.find(u => u.email === email || u.phone === phone);
-        if (exists) return res.status(400).json({ success: false, error: "账号已存在" });
-        
+      if (action === "register") {
+        const { email, phone, username, password } = req.body || {};
+        const exists = getUsers().find((u) => u.email === email || u.phone === phone);
+        if (exists) return fail(res, 400, "账号已存在");
         const user: User = {
           id: `u_${Math.random().toString(36).slice(2, 10)}`,
           username,
@@ -62,43 +103,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           avatar: "",
           createdAt: new Date().toISOString(),
         };
-        users.push(user);
-        
+        getUsers().push(user);
         const token = `token_${Math.random().toString(36).slice(2, 20)}`;
         sessions[token] = { userId: user.id, createdAt: new Date().toISOString() };
-        
-        return res.status(200).json({ success: true, data: { token, user: { id: user.id, username: user.username, avatar: user.avatar, role: user.role } } });
+        return ok(res, { token, user: publicUser(user) });
       }
 
-      if (url?.endsWith("/logout")) {
+      if (action === "logout") {
         const authHeader = req.headers.authorization;
         if (authHeader) {
           const token = authHeader.replace("Bearer ", "");
           delete sessions[token];
         }
-        return res.status(200).json({ success: true });
+        return ok(res, null);
       }
     }
 
-    if (method === "GET") {
-      if (url?.endsWith("/me")) {
-        const authHeader = req.headers.authorization;
-        if (!authHeader) return res.status(401).json({ success: false, error: "未登录" });
-        
-        const token = authHeader.replace("Bearer ", "");
-        const session = sessions[token];
-        if (!session) return res.status(401).json({ success: false, error: "登录已过期" });
-        
-        const user = users.find(u => u.id === session.userId);
-        if (!user) return res.status(404).json({ success: false, error: "用户不存在" });
-        
-        return res.status(200).json({ success: true, data: { id: user.id, username: user.username, email: user.email, phone: user.phone, avatar: user.avatar, role: user.role, createdAt: user.createdAt } });
-      }
+    if (method === "GET" && action === "me") {
+      const authHeader = req.headers.authorization;
+      if (!authHeader) return fail(res, 401, "未登录");
+      const token = authHeader.replace("Bearer ", "");
+      const session = sessions[token];
+      if (!session) return fail(res, 401, "登录已过期");
+      const user = getUsers().find((u) => u.id === session.userId);
+      if (!user) return fail(res, 404, "用户不存在");
+      return ok(res, publicUser(user));
     }
 
-    return res.status(405).json({ success: false, error: "Method not allowed" });
+    return fail(res, 405, "Method not allowed");
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ success: false, error: "Internal server error" });
+    console.error("auth API error:", error);
+    return fail(res, 500, "Internal server error");
   }
 }
