@@ -27,7 +27,7 @@ export function PromptArt({
   className,
   animated = true,
   imageSize = "landscape_16_9",
-  withImage = false,
+  withImage = true,
   videoPreview = false,
 }: Props) {
   const { hue, pattern, type, title, content, contentEn, model, videoUrl } = prompt;
@@ -40,9 +40,20 @@ export function PromptArt({
   const showImage = withImage && !imgFailed && !isVideo;
 
   const imgDesc = buildImageDescription(title, contentEn || content, type, model);
-  const posterSrc = `https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=${encodeURIComponent(
+  // 使用 Pollinations.ai 公网免费图片服务（无需 API key）
+  const sizeMap: Record<string, string> = {
+    square_hd: "512x512",
+    square: "768x768",
+    portrait_4_3: "768x1024",
+    portrait_16_9: "720x1280",
+    landscape_4_3: "1024x768",
+    landscape_16_9: "1280x720",
+  };
+  const dims = sizeMap[imageSize] || "1280x720";
+  const seed = hashCode(title).toString();
+  const posterSrc = `https://image.pollinations.ai/prompt/${encodeURIComponent(
     imgDesc,
-  )}&image_size=${imageSize}`;
+  )}?width=${dims.split("x")[0]}&height=${dims.split("x")[1]}&seed=${seed}&nologo=true&model=flux`;
 
   const h = hue;
   const c1 = `hsl(${h} 90% 62%)`;
@@ -84,9 +95,20 @@ export function PromptArt({
         />
       )}
 
-      {/* 生视频：视频播放（仅当有 videoUrl 时） */}
+      {/* 生视频：海报图 + 视频播放 */}
       {isVideo && (
         <>
+          <img
+            src={posterSrc}
+            alt={title}
+            loading="lazy"
+            onLoad={() => setImgLoaded(true)}
+            onError={() => setImgFailed(true)}
+            className={cn(
+              "absolute inset-0 h-full w-full object-cover transition-opacity duration-500",
+              videoPlaying ? "opacity-0" : "opacity-100",
+            )}
+          />
           <video
             ref={videoRef}
             src={videoUrl}
@@ -118,12 +140,10 @@ export function PromptArt({
         </>
       )}
 
-      {/* 不显示真实图片时，展示提示词标题摘要 */}
-      {!showImage && !isVideo && (
-        <div className="absolute inset-0 flex items-end p-4">
-          <p className="line-clamp-2 font-mono text-xs text-white/40">
-            {(contentEn || content).slice(0, 80)}
-          </p>
+      {/* 视频类型但无 videoUrl：用海报图代替，加视频标识 */}
+      {type === "video" && !isVideo && (
+        <div className="absolute bottom-3 right-3 z-10 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[10px] text-white/80">
+          VIDEO
         </div>
       )}
 
@@ -164,6 +184,15 @@ const TYPE_ICON: Record<string, string> = {
   video: "VD",
   task: "TSK",
 };
+
+/** 字符串哈希，用于生成稳定的图片种子 */
+function hashCode(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
 
 function buildImageDescription(
   title: string,
