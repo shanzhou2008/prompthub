@@ -14,11 +14,11 @@ import type {
   PromptListQuery,
   Submission,
   User,
-} from "./types.js";
-import { imageSeeds } from "./seeds/imageSeeds.js";
-import { videoSeeds } from "./seeds/videoSeeds.js";
-import { taskSeeds } from "./seeds/taskSeeds.js";
-import { extraSeeds } from "./seeds/extraSeeds.js";
+} from "";
+import { imageSeeds } from "";
+import { videoSeeds } from "";
+import { taskSeeds } from "";
+import { extraSeeds } from "";
 
 // ---- 工具 ----
 const now = Date.now();

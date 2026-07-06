@@ -2,8 +2,8 @@
  * 投稿与订阅路由
  */
 import { Router, type Request, type Response } from "express";
-import { prompts, submissions } from "../store.js";
-import { requireAuth, AuthedRequest } from "../lib/auth.js";
+import { prompts, submissions } from "";
+import { requireAuth, AuthedRequest } from "";
 
 const router = Router();
 

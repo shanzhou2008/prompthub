@@ -7,9 +7,9 @@ import {
   prompts,
   getProjectPromptCount,
   queryUserPrompts,
-} from "../store.js";
-import { requireAuth, AuthedRequest } from "../lib/auth.js";
-import type { Visibility } from "../types.js";
+} from "";
+import { requireAuth, AuthedRequest } from "";
+import type { Visibility } from "";
 
 const router = Router();
 

@@ -13,8 +13,8 @@ import {
   prompts,
   queryPrompts,
   ratings,
-} from "../store.js";
-import { resolveUser } from "../lib/auth.js";
+} from "";
+import { resolveUser } from "";
 
 const router = Router();
 

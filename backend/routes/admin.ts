@@ -7,8 +7,8 @@ import {
   jobLogs,
   prompts,
   submissions,
-} from "../store.js";
-import { requireAdmin, AuthedRequest } from "../lib/auth.js";
+} from "";
+import { requireAdmin, AuthedRequest } from "";
 
 const router = Router();
 

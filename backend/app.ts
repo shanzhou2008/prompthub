@@ -9,13 +9,13 @@ import express, {
 import cors from "cors";
 import dotenv from "dotenv";
 
-import authRoutes from "./routes/auth.js";
-import promptRoutes from "./routes/prompts.js";
-import favoriteRoutes from "./routes/favorites.js";
-import submissionRoutes from "./routes/submissions.js";
-import adminRoutes from "./routes/admin.js";
-import projectRoutes from "./routes/projects.js";
-import userRoutes from "./routes/user.js";
+import authRoutes from "";
+import promptRoutes from "";
+import favoriteRoutes from "";
+import submissionRoutes from "";
+import adminRoutes from "";
+import projectRoutes from "";
+import userRoutes from "";
 
 dotenv.config();
 

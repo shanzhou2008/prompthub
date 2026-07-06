@@ -1,15 +1,15 @@
 {
+  "version": 2,
   "buildCommand": "pnpm build",
   "outputDirectory": "dist",
+  "framework": "vite",
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" }
+  ],
   "functions": {
     "api/**/*.ts": {
-      "runtime": "@vercel/node@3.2.0",
       "memory": 256,
       "maxDuration": 10
     }
-  },
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/api/$1" },
-    { "src": "/(.*)", "dest": "/$1" }
-  ]
+  }
 }
