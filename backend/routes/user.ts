@@ -6,9 +6,9 @@ import {
   copyHistory,
   prompts,
   queryUserPrompts,
-} from "";
-import { requireAuth, AuthedRequest } from "";
-import type { Prompt } from "";
+} from "../store";
+import { requireAuth, AuthedRequest } from "../lib/auth";
+import type { Prompt } from "../types";
 
 const router = Router();
 

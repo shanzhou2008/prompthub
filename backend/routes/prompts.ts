@@ -13,8 +13,8 @@ import {
   prompts,
   queryPrompts,
   ratings,
-} from "";
-import { resolveUser } from "";
+} from "../store";
+import { resolveUser } from "../lib/auth";
 
 const router = Router();
 

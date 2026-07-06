@@ -6,8 +6,8 @@ import {
   collections,
   favorites,
   prompts,
-} from "";
-import { requireAuth, AuthedRequest } from "";
+} from "../store";
+import { requireAuth, AuthedRequest } from "../lib/auth";
 
 const router = Router();
 

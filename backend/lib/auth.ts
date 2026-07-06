@@ -2,8 +2,8 @@
  * 鉴权工具（基于内存会话 token 的简化实现）
  */
 import type { NextFunction, Request, Response } from "express";
-import { sessions, users } from "";
-import type { PublicUser, User } from "";
+import { sessions, users } from "../store";
+import type { PublicUser, User } from "../types";
 
 export interface AuthedRequest extends Request {
   user?: User;

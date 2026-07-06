@@ -3,8 +3,8 @@
  * 支持：邮箱+密码、手机号+密码、手机号+验证码
  */
 import { Router, type Request, type Response } from "express";
-import { passwords, sessions, smsCodes, users } from "";
-import { createSession, resolveUser, toPublic } from "";
+import { passwords, sessions, smsCodes, users } from "../store";
+import { createSession, resolveUser, toPublic } from "../lib/auth";
 
 const router = Router();
 
