@@ -27,7 +27,7 @@ export function PromptArt({
   className,
   animated = true,
   imageSize = "landscape_16_9",
-  withImage = true,
+  withImage = false,
   videoPreview = false,
 }: Props) {
   const { hue, pattern, type, title, content, contentEn, model, videoUrl } = prompt;
@@ -36,7 +36,7 @@ export function PromptArt({
   const [videoPlaying, setVideoPlaying] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  const isVideo = type === "video" && videoUrl;
+  const isVideo = type === "video" && !!videoUrl;
   const showImage = withImage && !imgFailed && !isVideo;
 
   const imgDesc = buildImageDescription(title, contentEn || content, type, model);
@@ -69,7 +69,7 @@ export function PromptArt({
       {/* 底层 CSS 抽象艺术 */}
       <CssArt hue={hue} pattern={pattern} c1={c1} c2={c2} c3={c3} />
 
-      {/* 生图：真实生成图 */}
+      {/* 生图：真实生成图（仅本地环境可用，公网默认关闭） */}
       {showImage && (
         <img
           src={posterSrc}
@@ -84,24 +84,12 @@ export function PromptArt({
         />
       )}
 
-      {/* 生视频：海报图 + 视频播放 */}
+      {/* 生视频：视频播放（仅当有 videoUrl 时） */}
       {isVideo && (
         <>
-          <img
-            src={posterSrc}
-            alt={title}
-            loading="lazy"
-            onLoad={() => setImgLoaded(true)}
-            onError={() => setImgFailed(true)}
-            className={cn(
-              "absolute inset-0 h-full w-full object-cover transition-opacity duration-500",
-              videoPlaying ? "opacity-0" : "opacity-100",
-            )}
-          />
           <video
             ref={videoRef}
             src={videoUrl}
-            poster={posterSrc}
             playsInline
             muted
             loop
@@ -128,6 +116,15 @@ export function PromptArt({
             VIDEO
           </div>
         </>
+      )}
+
+      {/* 不显示真实图片时，展示提示词标题摘要 */}
+      {!showImage && !isVideo && (
+        <div className="absolute inset-0 flex items-end p-4">
+          <p className="line-clamp-2 font-mono text-xs text-white/40">
+            {(contentEn || content).slice(0, 80)}
+          </p>
+        </div>
       )}
 
       {/* 加载中渐变遮罩 */}

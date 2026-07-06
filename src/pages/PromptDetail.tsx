@@ -53,14 +53,12 @@ export default function PromptDetail() {
   useEffect(() => {
     if (!id) return;
     setLoading(true);
-    Promise.all([api.prompt(id), api.related(id), api.comments(id)])
+    Promise.allSettled([api.prompt(id), api.related(id), api.comments(id)])
       .then(([p, r, c]) => {
-        setPrompt(p);
-        setRelated(r);
-        setComments(c);
-      })
-      .catch(() => {
-        setPrompt(null);
+        if (p.status === "fulfilled") setPrompt(p.value);
+        else setPrompt(null);
+        if (r.status === "fulfilled") setRelated(r.value);
+        if (c.status === "fulfilled") setComments(c.value);
       })
       .finally(() => setLoading(false));
   }, [id]);
