@@ -35,11 +35,25 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(`${BASE}${path}`, { ...opts, headers });
-  const json = await res.json();
+  const text = await res.text();
+  let json: any;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(`API 返回非 JSON: ${text.slice(0, 100)}`);
+  }
   if (!res.ok || !json.success) {
     throw new Error(json.error || `请求失败 (${res.status})`);
   }
   return json.data as T;
+}
+
+/** 确保返回数组，防止 API 返回非数组导致 .slice 崩溃 */
+function asArray<T>(v: any): T[] {
+  if (Array.isArray(v)) return v as T[];
+  if (v == null) return [];
+  console.warn("Expected array but got:", typeof v, v);
+  return [];
 }
 
 // ---- Auth ----
@@ -76,13 +90,17 @@ export const api = {
     return request<Paginated<Prompt>>(`/prompts?${q.toString()}`);
   },
   prompt: (id: string) => request<Prompt>(`/prompts/${id}`),
-  related: (id: string) => request<Prompt[]>(`/prompts/${id}/related`),
-  comments: (id: string) => request<Comment[]>(`/prompts/${id}/comments`),
-  daily: () => request<Prompt[]>("/prompts/daily"),
-  trending: () => request<Prompt[]>("/prompts/trending"),
-  latest: () => request<Prompt[]>("/prompts/latest"),
+  related: (id: string) => request<Prompt[]>(`/prompts/${id}/related`).then((v) => asArray<Prompt>(v)),
+  comments: (id: string) => request<Comment[]>(`/prompts/${id}/comments`).then((v) => asArray<Comment>(v)),
+  daily: () => request<Prompt[]>("/prompts/daily").then((v) => asArray<Prompt>(v)),
+  trending: () => request<Prompt[]>("/prompts/trending").then((v) => asArray<Prompt>(v)),
+  latest: () => request<Prompt[]>("/prompts/latest").then((v) => asArray<Prompt>(v)),
   stats: () => request<Stats>("/prompts/stats"),
-  filters: () => request<{ models: ModelInfo[]; tags: TagInfo[] }>("/prompts/filters"),
+  filters: () =>
+    request<{ models: ModelInfo[]; tags: TagInfo[] }>("/prompts/filters").then((r) => ({
+      models: asArray<ModelInfo>(r?.models),
+      tags: asArray<TagInfo>(r?.tags),
+    })),
   recordCopy: (id: string) =>
     request<{ copyCount: number }>(`/prompts/${id}/copy`, { method: "POST" }),
   rate: (id: string, score: number) =>
@@ -95,8 +113,8 @@ export const api = {
 
   // ---- Favorites (with collections) ----
   favorites: (collectionId?: string) =>
-    request<Prompt[]>(`/favorites${collectionId ? `?collectionId=${collectionId}` : ""}`),
-  favoriteIds: () => request<string[]>("/favorites/ids"),
+    request<Prompt[]>(`/favorites${collectionId ? `?collectionId=${collectionId}` : ""}`).then((v) => asArray<Prompt>(v)),
+  favoriteIds: () => request<string[]>("/favorites/ids").then((v) => asArray<string>(v)),
   toggleFavorite: (promptId: string, collectionId?: string) =>
     request<{ favorited: boolean }>("/favorites", {
       method: "POST",
@@ -107,7 +125,7 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ collectionId }),
     }),
-  collections: () => request<(Collection & { count: number })[]>("/favorites/collections"),
+  collections: () => request<(Collection & { count: number })[]>("/favorites/collections").then((v) => asArray<Collection & { count: number }>(v)),
   createCollection: (name: string, icon?: string) =>
     request<Collection>("/favorites/collections", {
       method: "POST",
@@ -117,27 +135,27 @@ export const api = {
     request(`/favorites/collections/${id}`, { method: "DELETE" }),
 
   // ---- Projects ----
-  projects: () => request<(Project & { promptCount: number })[]>("/projects"),
+  projects: () => request<(Project & { promptCount: number })[]>("/projects").then((v) => asArray<Project & { promptCount: number }>(v)),
   createProject: (body: { name: string; description?: string; color?: string; visibility?: string }) =>
     request<Project>("/projects", { method: "POST", body: JSON.stringify(body) }),
   updateProject: (id: string, body: Partial<Project>) =>
     request(`/projects/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteProject: (id: string) =>
     request(`/projects/${id}`, { method: "DELETE" }),
-  projectPrompts: (id: string) => request<Prompt[]>(`/projects/${id}/prompts`),
+  projectPrompts: (id: string) => request<Prompt[]>(`/projects/${id}/prompts`).then((v) => asArray<Prompt>(v)),
 
   // ---- User data ----
-  myHistory: () => request<CopyHistory[]>("/user/history"),
+  myHistory: () => request<CopyHistory[]>("/user/history").then((v) => asArray<CopyHistory>(v)),
   clearHistory: () => request("/user/history", { method: "DELETE" }),
   myPrompts: (projectId?: string) =>
-    request<Prompt[]>(`/user/prompts${projectId ? `?projectId=${projectId}` : ""}`),
+    request<Prompt[]>(`/user/prompts${projectId ? `?projectId=${projectId}` : ""}`).then((v) => asArray<Prompt>(v)),
   createMyPrompt: (body: Record<string, unknown>) =>
     request<Prompt>("/user/prompts", { method: "POST", body: JSON.stringify(body) }),
   updateMyPrompt: (id: string, body: Record<string, unknown>) =>
     request(`/user/prompts/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   deleteMyPrompt: (id: string) =>
     request(`/user/prompts/${id}`, { method: "DELETE" }),
-  compare: (ids: string[]) => request<Prompt[]>(`/user/compare?ids=${ids.join(",")}`),
+  compare: (ids: string[]) => request<Prompt[]>(`/user/compare?ids=${ids.join(",")}`).then((v) => asArray<Prompt>(v)),
 
   // ---- Submissions & subscriptions ----
   submit: (body: Record<string, unknown>) =>
@@ -145,7 +163,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  mySubmissions: () => request<Submission[]>("/submissions/me"),
+  mySubmissions: () => request<Submission[]>("/submissions/me").then((v) => asArray<Submission>(v)),
   subscribe: (email: string) =>
     request("/subscriptions", { method: "POST", body: JSON.stringify({ email }) }),
 
@@ -159,13 +177,13 @@ export const api = {
       byType: Record<string, number>;
       recent: { id: string; title: string; createdAt: string; type: string }[];
     }>("/admin/stats"),
-  reviewQueue: () => request<Submission[]>("/admin/review"),
+  reviewQueue: () => request<Submission[]>("/admin/review").then((v) => asArray<Submission>(v)),
   review: (id: string, action: "approve" | "reject", note?: string) =>
     request("/admin/review", {
       method: "POST",
       body: JSON.stringify({ id, action, note }),
     }),
-  adminPrompts: () => request<Prompt[]>("/admin/prompts"),
+  adminPrompts: () => request<Prompt[]>("/admin/prompts").then((v) => asArray<Prompt>(v)),
   adminSources: () => request<DataSource[]>("/admin/sources"),
   adminJobs: () => request<JobLog[]>("/admin/jobs"),
   toggleSource: (id: string, enabled: boolean) =>
