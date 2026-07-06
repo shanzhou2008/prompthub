@@ -37,7 +37,7 @@ export function PromptArt({
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const isVideo = type === "video" && !!videoUrl;
-  const showImage = withImage && !imgFailed && !isVideo;
+  const showImage = withImage && !imgFailed;
 
   const imgDesc = buildImageDescription(title, contentEn || content, type, model);
   // 使用 Pollinations.ai 公网免费图片服务（无需 API key）
@@ -80,7 +80,7 @@ export function PromptArt({
       {/* 底层 CSS 抽象艺术 */}
       <CssArt hue={hue} pattern={pattern} c1={c1} c2={c2} c3={c3} />
 
-      {/* 生图：真实生成图（仅本地环境可用，公网默认关闭） */}
+      {/* 生图/视频海报/任务可视化：Pollinations 生成的图片 */}
       {showImage && (
         <img
           src={posterSrc}
@@ -95,20 +95,9 @@ export function PromptArt({
         />
       )}
 
-      {/* 生视频：海报图 + 视频播放 */}
+      {/* 有真实视频 URL 时：hover 可播放 */}
       {isVideo && (
         <>
-          <img
-            src={posterSrc}
-            alt={title}
-            loading="lazy"
-            onLoad={() => setImgLoaded(true)}
-            onError={() => setImgFailed(true)}
-            className={cn(
-              "absolute inset-0 h-full w-full object-cover transition-opacity duration-500",
-              videoPlaying ? "opacity-0" : "opacity-100",
-            )}
-          />
           <video
             ref={videoRef}
             src={videoUrl}
@@ -125,7 +114,7 @@ export function PromptArt({
           />
           {/* 播放按钮 */}
           {!videoPlaying && (
-            <div className="absolute inset-0 flex items-center justify-center">
+            <div className="absolute inset-0 z-20 flex items-center justify-center">
               <div className="flex h-14 w-14 items-center justify-center rounded-full bg-black/50 backdrop-blur-md ring-2 ring-white/30 transition-transform group-hover:scale-110">
                 <svg className="ml-1 h-6 w-6 text-white" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M8 5v14l11-7z" />
@@ -133,16 +122,12 @@ export function PromptArt({
               </div>
             </div>
           )}
-          {/* 视频标识 */}
-          <div className="absolute bottom-3 right-3 z-10 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[10px] text-white/80">
-            VIDEO
-          </div>
         </>
       )}
 
-      {/* 视频类型但无 videoUrl：用海报图代替，加视频标识 */}
-      {type === "video" && !isVideo && (
-        <div className="absolute bottom-3 right-3 z-10 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[10px] text-white/80">
+      {/* 视频类型标识（无论有无 videoUrl 都显示） */}
+      {type === "video" && (
+        <div className="absolute bottom-3 right-3 z-20 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[10px] text-white/80">
           VIDEO
         </div>
       )}
@@ -200,11 +185,25 @@ function buildImageDescription(
   type: string,
   model: string,
 ): string {
-  if (type === "task") {
-    return `abstract futuristic visualization representing ${title}, flowing data streams, neural network nodes, dark background with neon accents, cinematic, ultra detailed, 3d render`;
+  // 去掉 Midjourney / SD 等专用参数（--ar, --v, --s, --q, --w, --no, --seed 等）
+  const cleaned = (content || title)
+    .replace(/--\w+\s+\S+/g, "")   // --flag value
+    .replace(/\s{2,}/g, " ")       // 多空格合并
+    .trim()
+    .slice(0, 250);
+
+  if (type === "image") {
+    // 生图：直接用提示词内容描述，这是最精准的
+    return `${cleaned}, masterpiece, best quality, ultra detailed, cinematic lighting, 8k`;
   }
-  const core = (content || title).slice(0, 220);
-  return `${core}, masterpiece, best quality, ultra detailed, cinematic lighting, 8k`;
+
+  if (type === "video") {
+    // 生视频：用内容生成视频的关键帧/画面预览
+    return `cinematic still frame from a video, ${cleaned}, photorealistic, dramatic lighting, 8k, film grain`;
+  }
+
+  // 任务类型：生成有科技感的抽象可视化
+  return `futuristic holographic interface visualization representing "${title}", glowing data streams, neural network connections, dark background with cyan and purple neon accents, abstract tech art, ultra detailed, 3d render, 8k`;
 }
 
 function CssArt({
