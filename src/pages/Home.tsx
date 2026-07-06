@@ -1,50 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  Image as ImageIcon,
-  Clapperboard,
-  Terminal,
-  ArrowUpRight,
-  Mail,
-  TrendingUp,
-} from "lucide-react";
 import { api } from "@/lib/api";
 import type { Prompt, Stats } from "@/lib/types";
-import { Hero } from "@/components/Hero";
-import { PromptCard } from "@/components/PromptCard";
-import { PromptArt } from "@/components/PromptArt";
-import { SectionHeader } from "@/components/SectionHeader";
-import { Reveal } from "@/components/Reveal";
-import { GridSkeleton } from "@/components/Spinner";
-import { toast } from "@/store/useToast";
-import { cn, formatCount, typeMeta } from "@/lib/utils";
-
-const CATEGORIES = [
-  {
-    type: "image" as const,
-    title: "生图提示词",
-    desc: "Midjourney · Flux · DALL·E · SD",
-    icon: ImageIcon,
-    gradient: "from-neon-purple/30 to-neon-blue/10",
-    accent: "text-neon-purple",
-  },
-  {
-    type: "video" as const,
-    title: "生视频提示词",
-    desc: "Sora · Runway · 可灵 · 即梦",
-    icon: Clapperboard,
-    gradient: "from-neon-cyan/30 to-neon-blue/10",
-    accent: "text-neon-cyan",
-  },
-  {
-    type: "task" as const,
-    title: "任务执行提示词",
-    desc: "GPT · Claude · Gemini",
-    icon: Terminal,
-    gradient: "from-neon-amber/30 to-neon-rose/10",
-    accent: "text-neon-amber",
-  },
-];
 
 export default function Home() {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -52,228 +9,155 @@ export default function Home() {
   const [latest, setLatest] = useState<Prompt[]>([]);
   const [trending, setTrending] = useState<Prompt[]>([]);
   const [loading, setLoading] = useState(true);
-  const [email, setEmail] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.allSettled([api.stats(), api.daily(), api.latest(), api.trending()])
-      .then(([s, d, l, t]) => {
-        if (s.status === "fulfilled") setStats(s.value);
-        if (d.status === "fulfilled") setDaily(d.value);
-        if (l.status === "fulfilled") setLatest(l.value);
-        if (t.status === "fulfilled") setTrending(t.value);
-      })
-      .finally(() => setLoading(false));
+    let mounted = true;
+    (async () => {
+      try {
+        const results = await Promise.allSettled([
+          api.stats(),
+          api.daily(),
+          api.latest(),
+          api.trending(),
+        ]);
+        if (!mounted) return;
+        if (results[0].status === "fulfilled") setStats(results[0].value);
+        if (results[1].status === "fulfilled") setDaily(results[1].value);
+        if (results[2].status === "fulfilled") setLatest(results[2].value);
+        if (results[3].status === "fulfilled") setTrending(results[3].value);
+        const allFailed = results.every((r) => r.status === "rejected");
+        if (allFailed) setError("所有数据加载失败，请检查网络");
+      } catch (e: any) {
+        if (mounted) setError(e?.message || "加载失败");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  const onSubscribe = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email) return;
-    try {
-      await api.subscribe(email);
-      toast.success("订阅成功！每日精选将送达你的邮箱");
-      setEmail("");
-    } catch (err: any) {
-      toast.error(err.message || "订阅失败");
-    }
-  };
+  // 调试信息（临时）
+  const [debugInfo, setDebugInfo] = useState("");
+  useEffect(() => {
+    fetch("/api/prompts/stats")
+      .then((r) => r.text())
+      .then((t) => setDebugInfo(`stats API: ${t.slice(0, 200)}`))
+      .catch((e) => setDebugInfo(`stats API error: ${e.message}`));
+  }, []);
 
   return (
     <>
-      <Hero stats={stats} />
+      {/* 调试条 - 临时 */}
+      <div style={{ background: "#1a0033", color: "#0f0", padding: "8px 16px", fontFamily: "monospace", fontSize: "11px", wordBreak: "break-all" }}>
+        DEBUG: {debugInfo || "loading..."} | stats={stats ? "OK" : "null"} | daily={daily.length} | latest={latest.length} | trending={trending.length} | loading={String(loading)}
+      </div>
+
+      {/* Hero */}
+      <section style={{ padding: "40px 20px", textAlign: "center" }}>
+        <h1 style={{ fontSize: "32px", fontWeight: 800, margin: "0 0 12px" }}>
+          发现最棒的 <span style={{ color: "#a855f7" }}>AI 提示词</span>
+        </h1>
+        <p style={{ color: "#aaa", maxWidth: "600px", margin: "0 auto 20px" }}>
+          聚合生图、生视频与任务执行的优质提示词，每日更新，开箱即用。
+        </p>
+        {stats && (
+          <div style={{ display: "flex", gap: "16px", justifyContent: "center", flexWrap: "wrap", marginTop: "20px" }}>
+            <Stat label="提示词总数" value={stats.total} />
+            <Stat label="生图" value={stats.image} />
+            <Stat label="生视频" value={stats.video} />
+            <Stat label="任务" value={stats.task} />
+          </div>
+        )}
+      </section>
+
+      {error && (
+        <div style={{ padding: "12px 20px", background: "#7f1d1d", color: "#fff", textAlign: "center" }}>
+          {error}
+        </div>
+      )}
 
       {/* 每日精选 */}
-      <section id="daily" className="container-app scroll-mt-24 py-12">
-        <Reveal>
-          <SectionHeader
-            title="每日精选"
-            subtitle="编辑团队与算法共同挑选的当日最佳提示词"
-            moreTo="/explore?sort=rating"
-          />
-        </Reveal>
-
-        {loading ? (
-          <GridSkeleton count={4} />
-        ) : (
-          <div className="-mx-5 flex gap-4 overflow-x-auto px-5 pb-4 no-scrollbar lg:mx-0 lg:px-0">
-            {daily.map((p, i) => (
-              <Reveal key={p.id} delay={i * 0.05} className="shrink-0">
-                <FeaturedCard prompt={p} />
-              </Reveal>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* 分类导航 */}
-      <section className="container-app py-12">
-        <Reveal>
-          <SectionHeader title="按类型探索" subtitle="找到适合你工作流的那一类提示词" />
-        </Reveal>
-        <div className="grid gap-4 sm:grid-cols-3">
-          {CATEGORIES.map((c, i) => (
-            <Reveal key={c.type} delay={i * 0.08}>
-              <Link
-                to={`/explore?type=${c.type}`}
-                className={cn(
-                  "card-glow group relative block overflow-hidden rounded-2xl border border-white/5 bg-gradient-to-br p-6 transition-all hover:-translate-y-1",
-                  c.gradient,
-                )}
-              >
-                <div className="pointer-events-none absolute inset-0 grid-bg opacity-30" />
-                <div className="relative">
-                  <div
-                    className={cn(
-                      "mb-4 grid h-12 w-12 place-items-center rounded-xl border border-white/10 bg-ink-900/50",
-                      c.accent,
-                    )}
-                  >
-                    <c.icon className="h-6 w-6" />
-                  </div>
-                  <h3 className="font-display text-lg font-bold text-mist-50">{c.title}</h3>
-                  <p className="mt-1 text-sm text-mist-300">{c.desc}</p>
-                  <div className="mt-4 flex items-center gap-1 text-sm font-medium text-mist-400 transition group-hover:text-neon-cyan">
-                    立即探索
-                    <ArrowUpRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-                  </div>
-                </div>
-              </Link>
-            </Reveal>
-          ))}
-        </div>
-      </section>
+      <Section title="每日精选" prompts={daily} loading={loading} max={4} />
 
       {/* 最新更新 */}
-      <section className="container-app py-12">
-        <Reveal>
-          <SectionHeader
-            title="最新更新"
-            subtitle="精选收录与社区分享的最新提示词"
-            moreTo="/explore?sort=latest"
-          />
-        </Reveal>
-        {loading ? (
-          <GridSkeleton count={8} />
-        ) : (
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {latest.slice(0, 8).map((p, i) => (
-              <Reveal key={p.id} delay={(i % 4) * 0.05}>
-                <PromptCard prompt={p} index={i} />
-              </Reveal>
-            ))}
-          </div>
-        )}
-      </section>
+      <Section title="最新更新" prompts={latest} loading={loading} max={8} />
 
       {/* 热门趋势 */}
-      <section className="container-app py-12">
-        <Reveal>
-          <SectionHeader
-            title="热门趋势"
-            subtitle="按浏览量与复制量综合排序"
-            moreTo="/explore?sort=trending"
-          />
-        </Reveal>
-        {loading ? (
-          <GridSkeleton count={4} />
-        ) : (
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            {trending.slice(0, 4).map((p, i) => (
-              <Reveal key={p.id} delay={i * 0.06}>
-                <TrendingCard prompt={p} rank={i + 1} />
-              </Reveal>
-            ))}
-          </div>
-        )}
-      </section>
+      <Section title="热门趋势" prompts={trending} loading={loading} max={4} />
 
-      {/* 订阅 */}
-      <section className="container-app py-16">
-        <Reveal>
-          <div className="card-glow relative overflow-hidden rounded-3xl border border-white/10 bg-ink-800/60 p-8 sm:p-12">
-            <div className="pointer-events-none absolute inset-0">
-              <div className="absolute -right-20 -top-20 h-72 w-72 rounded-full bg-neon-purple/20 blur-[100px]" />
-              <div className="absolute -bottom-20 -left-20 h-72 w-72 rounded-full bg-neon-cyan/15 blur-[100px]" />
-            </div>
-            <div className="relative grid items-center gap-8 lg:grid-cols-2">
-              <div>
-                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs text-neon-cyan">
-                  <Mail className="h-3.5 w-3.5" /> 每日精选邮件
-                </div>
-                <h2 className="text-balance font-display text-2xl font-extrabold leading-tight sm:text-3xl">
-                  让最好的提示词，<span className="text-gradient">每天主动找上门</span>
-                </h2>
-                <p className="mt-3 max-w-md text-sm text-mist-300">
-                  订阅后每日清晨收到当日精选合集，按你的偏好筛选，绝不打扰。
-                </p>
-              </div>
-              <form onSubmit={onSubscribe} className="flex flex-col gap-3 sm:flex-row">
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="your@email.com"
-                  className="input flex-1"
-                />
-                <button type="submit" className="btn-neon shrink-0">
-                  <Mail className="h-4 w-4" />
-                  订阅
-                </button>
-              </form>
-            </div>
-          </div>
-        </Reveal>
+      {/* 分类导航 */}
+      <section style={{ padding: "20px", maxWidth: "1200px", margin: "0 auto" }}>
+        <h2 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "16px" }}>按类型探索</h2>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px" }}>
+          <Link to="/explore?type=image" style={catLink}>生图提示词</Link>
+          <Link to="/explore?type=video" style={catLink}>生视频提示词</Link>
+          <Link to="/explore?type=task" style={catLink}>任务执行提示词</Link>
+        </div>
       </section>
     </>
   );
 }
 
-/** 每日精选横向卡片 */
-function FeaturedCard({ prompt }: { prompt: Prompt }) {
-  const meta = typeMeta(prompt.type);
+const catLink: React.CSSProperties = {
+  display: "block",
+  padding: "20px",
+  background: "#1a1a2e",
+  border: "1px solid #333",
+  borderRadius: "12px",
+  color: "#fff",
+  textDecoration: "none",
+  fontWeight: 600,
+  textAlign: "center",
+};
+
+function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <Link
-      to={`/prompt/${prompt.id}`}
-      className="card-glow flex w-[300px] flex-col overflow-hidden rounded-2xl border border-white/5 bg-ink-800/60 transition-all hover:-translate-y-1 sm:w-[340px]"
-    >
-      <div className="relative aspect-[16/9] w-full">
-        <PromptArt prompt={prompt} className="h-full w-full" />
-        <span
-          className={cn(
-            "absolute left-3 top-3 rounded-md bg-gradient-to-r px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white",
-            meta.color,
-          )}
-        >
-          {meta.label}
-        </span>
-      </div>
-      <div className="flex flex-1 flex-col p-4">
-        <div className="mb-1 text-[11px] text-mist-400">{prompt.model}</div>
-        <h3 className="line-clamp-1 font-display text-base font-semibold text-mist-50">
-          {prompt.title}
-        </h3>
-        <p className="mt-1.5 line-clamp-2 font-mono text-xs text-mist-400">
-          {prompt.content}
-        </p>
-        <div className="mt-3 flex items-center gap-3 text-[11px] text-mist-400">
-          <span className="flex items-center gap-1">
-            <TrendingUp className="h-3 w-3" /> {formatCount(prompt.viewCount)}
-          </span>
-          <span>★ {prompt.ratingAvg.toFixed(1)}</span>
-        </div>
-      </div>
-    </Link>
+    <div style={{ background: "#1a1a2e", padding: "12px 20px", borderRadius: "8px", border: "1px solid #333" }}>
+      <div style={{ fontSize: "11px", color: "#888" }}>{label}</div>
+      <div style={{ fontSize: "20px", fontWeight: 700, color: "#a855f7" }}>{value}</div>
+    </div>
   );
 }
 
-/** 热门卡片（带排名） */
-function TrendingCard({ prompt, rank }: { prompt: Prompt; rank: number }) {
+function Section({ title, prompts, loading, max }: { title: string; prompts: Prompt[]; loading: boolean; max: number }) {
   return (
-    <div className="relative">
-      <span className="absolute -left-2 -top-3 z-10 font-display text-5xl font-extrabold text-white/5">
-        {rank}
-      </span>
-      <PromptCard prompt={prompt} />
-    </div>
+    <section style={{ padding: "20px", maxWidth: "1200px", margin: "0 auto" }}>
+      <h2 style={{ fontSize: "20px", fontWeight: 700, marginBottom: "16px" }}>{title}</h2>
+      {loading ? (
+        <div style={{ color: "#666", padding: "20px" }}>加载中...</div>
+      ) : prompts.length === 0 ? (
+        <div style={{ color: "#666", padding: "20px" }}>暂无数据</div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: "12px" }}>
+          {prompts.slice(0, max).map((p) => (
+            <Link
+              key={p.id}
+              to={`/prompt/${p.id}`}
+              style={{
+                display: "block",
+                padding: "16px",
+                background: "#1a1a2e",
+                border: "1px solid #333",
+                borderRadius: "12px",
+                color: "#fff",
+                textDecoration: "none",
+              }}
+            >
+              <div style={{ fontSize: "11px", color: "#888", marginBottom: "4px" }}>{p.model}</div>
+              <div style={{ fontSize: "14px", fontWeight: 600, marginBottom: "6px" }}>{p.title}</div>
+              <div style={{ fontSize: "12px", color: "#aaa", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {p.content}
+              </div>
+              <div style={{ marginTop: "8px", fontSize: "11px", color: "#666" }}>
+                浏览 {p.viewCount} · 复制 {p.copyCount} · ★ {p.ratingAvg}
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
