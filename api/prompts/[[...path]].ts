@@ -52,10 +52,12 @@ function loadFilters() {
 }
 
 function ok(res: VercelResponse, data: unknown) {
+  res.setHeader("Cache-Control", "no-store, max-age=0");
   return res.status(200).json({ success: true, data });
 }
 
 function fail(res: VercelResponse, status: number, error: string) {
+  res.setHeader("Cache-Control", "no-store, max-age=0");
   return res.status(status).json({ success: false, error });
 }
 
