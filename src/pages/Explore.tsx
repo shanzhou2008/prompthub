@@ -34,6 +34,7 @@ export default function Explore() {
 
   const [data, setData] = useState<Paginated<Prompt> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [tags, setTags] = useState<TagInfo[]>([]);
   const [searchInput, setSearchInput] = useState(q);
@@ -53,9 +54,16 @@ export default function Explore() {
 
   useEffect(() => {
     setLoading(true);
+    setError(null);
     api
       .listPrompts({ q, type, model, tag, sort, page, pageSize: 12 })
-      .then(setData)
+      .then((result) => {
+        setData(result);
+      })
+      .catch((err) => {
+        console.error("加载提示词列表失败:", err);
+        setError(err.message || "加载失败");
+      })
       .finally(() => setLoading(false));
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [q, type, model, tag, sort, page]);
@@ -176,7 +184,16 @@ export default function Explore() {
         <div className="min-w-0 flex-1">
           {loading ? (
             <GridSkeleton count={9} />
-          ) : data && data.data.length > 0 ? (
+          ) : error ? (
+            <ErrorState error={error} onRetry={() => {
+              setError(null);
+              setLoading(true);
+              api.listPrompts({ q, type, model, tag, sort, page, pageSize: 12 })
+                .then(setData)
+                .catch((err) => setError(err.message || "加载失败"))
+                .finally(() => setLoading(false));
+            }} />
+          ) : data && data.data && data.data.length > 0 ? (
             <>
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
                 {data.data.map((p, i) => (
@@ -384,6 +401,21 @@ function EmptyState({ onReset }: { onReset: () => void }) {
       <p className="mt-1 text-sm text-mist-400">试试更换关键词或清除筛选条件</p>
       <button onClick={onReset} className="btn-neon mt-5">
         重置筛选
+      </button>
+    </div>
+  );
+}
+
+function ErrorState({ error, onRetry }: { error: string; onRetry: () => void }) {
+  return (
+    <div className="grid place-items-center rounded-2xl border border-dashed border-red-500/30 bg-ink-800/40 py-20 text-center">
+      <div className="mb-3 grid h-14 w-14 place-items-center rounded-2xl border border-red-500/30 bg-red-500/10 text-red-400">
+        <X className="h-6 w-6" />
+      </div>
+      <p className="font-display text-lg font-semibold text-mist-100">加载失败</p>
+      <p className="mt-1 max-w-md text-sm text-red-300/70">{error}</p>
+      <button onClick={onRetry} className="btn-neon mt-5">
+        重试
       </button>
     </div>
   );

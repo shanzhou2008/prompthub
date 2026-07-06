@@ -26,11 +26,15 @@ type Prompt = {
 
 const dataDir = path.join(process.cwd(), "api", "data");
 
+let _promptsCache: Prompt[] | null = null;
 function loadPrompts(): Prompt[] {
+  if (_promptsCache) return _promptsCache;
   try {
     const raw = fs.readFileSync(path.join(dataDir, "prompts.json"), "utf8");
-    return JSON.parse(raw);
-  } catch {
+    _promptsCache = JSON.parse(raw);
+    return _promptsCache;
+  } catch (e) {
+    console.error("Failed to load prompts.json:", e);
     return [];
   }
 }
@@ -61,33 +65,88 @@ function fail(res: VercelResponse, status: number, error: string) {
   return res.status(status).json({ success: false, error });
 }
 
-function getFirst(req: VercelRequest): string {
-  const raw = req.query.path;
-  const parts = Array.isArray(raw) ? raw : raw ? [String(raw)] : [];
-  if (parts[0]) return parts[0];
+/**
+ * Parse URL path segments after /api/prompts/
+ */
+function parseSegments(req: VercelRequest): string[] {
+  // Method 1: Use req.query.path (Vercel's [[...path]] catch-all)
+  const rawPath = req.query.path;
+  if (rawPath) {
+    const parts = Array.isArray(rawPath) ? rawPath : [String(rawPath)];
+    const filtered = parts.filter((s: string) => s && s.length > 0);
+    if (filtered.length > 0) return filtered;
+  }
+
+  // Method 2: Parse from req.url
   const url = req.url || "";
-  const m = url.match(/\/api\/prompts\/([^/?]+)/);
-  return m ? m[1] : "";
+  const pathOnly = url.split("?")[0];
+  const m = pathOnly.match(/^\/api\/prompts\/(.+)$/);
+  if (m && m[1]) {
+    return m[1].split("/").filter((s) => s.length > 0);
+  }
+
+  return [];
 }
 
-function getSecond(req: VercelRequest): string {
-  const raw = req.query.path;
-  const parts = Array.isArray(raw) ? raw : raw ? [String(raw)] : [];
-  if (parts[1]) return parts[1];
-  const url = req.url || "";
-  const m = url.match(/\/api\/prompts\/[^/?]+\/([^/?]+)/);
-  return m ? m[1] : "";
-}
+/**
+ * Known route keywords that should NOT be treated as prompt IDs
+ */
+const ROUTE_KEYWORDS = new Set(["stats", "filters", "daily", "trending", "latest", "list"]);
 
-function hasSecond(req: VercelRequest): boolean {
-  return !!getSecond(req);
+/**
+ * 列表查询逻辑（支持筛选/搜索/分页）— 被 /list 和 fallback 共用
+ */
+function handleListQuery(query: VercelRequest["query"]) {
+  const prompts = loadPrompts();
+  const { q, type, model, tag, sort = "latest", page = "1", pageSize = "12", featured, language, authorId, projectId } = query;
+
+  let list = prompts.filter((p) => p.status === "published" && p.visibility === "public");
+
+  if (featured === "true") list = list.filter((p) => p.isFeatured);
+  if (typeof type === "string" && type) list = list.filter((p) => p.type === type);
+  if (typeof model === "string" && model) list = list.filter((p) => p.model === model);
+  if (typeof tag === "string" && tag) list = list.filter((p) => p.tags.includes(tag));
+  if (typeof language === "string" && language) list = list.filter((p) => p.language === language);
+  if (typeof authorId === "string" && authorId) list = list.filter((p) => (p as any).userId === authorId);
+  if (typeof projectId === "string" && projectId) list = list.filter((p) => (p as any).projectId === projectId);
+  if (typeof q === "string" && q) {
+    const kw = (q as string).toLowerCase();
+    list = list.filter(
+      (p) =>
+        p.title.toLowerCase().includes(kw) ||
+        p.contentEn.toLowerCase().includes(kw) ||
+        p.contentZh.toLowerCase().includes(kw) ||
+        p.tags.some((t) => t.toLowerCase().includes(kw)) ||
+        p.model.toLowerCase().includes(kw),
+    );
+  }
+
+  const s = typeof sort === "string" ? sort : "latest";
+  if (s === "latest") {
+    list = [...list].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  } else if (s === "trending") {
+    list = [...list].sort((a, b) => b.viewCount + b.copyCount * 3 - (a.viewCount + a.copyCount * 3));
+  } else if (s === "rating") {
+    list = [...list].sort((a, b) => b.ratingAvg - a.ratingAvg);
+  } else if (s === "random") {
+    list = [...list].sort(() => Math.random() - 0.5);
+  }
+
+  const total = list.length;
+  const pageNum = Number(page) || 1;
+  const pageSizeNum = Number(pageSize) || 12;
+  const start = (pageNum - 1) * pageSizeNum;
+  const data = list.slice(start, start + pageSizeNum);
+
+  return { data, total, page: pageNum, pageSize: pageSizeNum, hasMore: start + pageSizeNum < total };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { method } = req;
-    const first = getFirst(req);
-    console.log(`[prompts] ${method} ${req.url} first="${first}" query=`, JSON.stringify(req.query));
+    const segments = parseSegments(req);
+    const first = segments[0] || "";
+    const second = segments[1] || "";
 
     if (method === "GET") {
       // /prompts/stats
@@ -141,8 +200,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return ok(res, latest);
       }
 
+      // /prompts/list — 列表查询（主要入口，有路径段确保 Vercel 路由可靠匹配）
+      if (first === "list") {
+        return ok(res, handleListQuery(req.query));
+      }
+
       // /prompts/:id/related
-      if (first && getSecond(req) === "related") {
+      if (first && second === "related") {
         const prompts = loadPrompts();
         const target = prompts.find((p) => p.id === first);
         if (!target) return fail(res, 404, "Not found");
@@ -167,13 +231,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       // /prompts/:id/comments
-      if (first && getSecond(req) === "comments") {
-        // 静态数据无评论，返回空数组
+      if (first && second === "comments") {
         return ok(res, []);
       }
 
-      // /prompts/:id
-      if (first && !hasSecond(req)) {
+      // /prompts/:id  (only if first is NOT a known route keyword and no second segment)
+      if (first && !second && !ROUTE_KEYWORDS.has(first)) {
         const prompts = loadPrompts();
         const prompt = prompts.find(
           (p) => p.id === first && p.status === "published" && p.visibility === "public",
@@ -182,70 +245,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(res, 404, "Prompt not found");
       }
 
-      // /prompts (列表)
-      const prompts = loadPrompts();
-      console.log(`[prompts list] loaded ${prompts.length} prompts from JSON`);
-      const { q, type, model, tag, sort = "latest", page = "1", pageSize = "12", featured, language, authorId, projectId } = req.query;
-      console.log(`[prompts list] filters: q="${q}" type="${type}" model="${model}" tag="${tag}" sort="${sort}" page="${page}"`);
-
-      let list = prompts.filter((p) => p.status === "published" && p.visibility === "public");
-
-      if (featured === "true") list = list.filter((p) => p.isFeatured);
-      if (typeof type === "string" && type) list = list.filter((p) => p.type === type);
-      if (typeof model === "string" && model) list = list.filter((p) => p.model === model);
-      if (typeof tag === "string" && tag) list = list.filter((p) => p.tags.includes(tag));
-      if (typeof language === "string" && language) list = list.filter((p) => p.language === language);
-      if (typeof authorId === "string" && authorId) list = list.filter((p) => (p as any).userId === authorId);
-      if (typeof projectId === "string" && projectId) list = list.filter((p) => (p as any).projectId === projectId);
-      if (typeof q === "string" && q) {
-        const kw = q.toLowerCase();
-        list = list.filter(
-          (p) =>
-            p.title.toLowerCase().includes(kw) ||
-            p.contentEn.toLowerCase().includes(kw) ||
-            p.contentZh.toLowerCase().includes(kw) ||
-            p.tags.some((t) => t.toLowerCase().includes(kw)) ||
-            p.model.toLowerCase().includes(kw),
-        );
-      }
-
-      const s = typeof sort === "string" ? sort : "latest";
-      if (s === "latest") {
-        list = [...list].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      } else if (s === "trending") {
-        list = [...list].sort((a, b) => b.viewCount + b.copyCount * 3 - (a.viewCount + a.copyCount * 3));
-      } else if (s === "rating") {
-        list = [...list].sort((a, b) => b.ratingAvg - a.ratingAvg);
-      } else if (s === "random") {
-        list = [...list].sort(() => Math.random() - 0.5);
-      }
-
-      const total = list.length;
-      const pageNum = Number(page) || 1;
-      const pageSizeNum = Number(pageSize) || 12;
-      const start = (pageNum - 1) * pageSizeNum;
-      const data = list.slice(start, start + pageSizeNum);
-
-      return ok(res, {
-        data,
-        total,
-        page: pageNum,
-        pageSize: pageSizeNum,
-        hasMore: start + pageSizeNum < total,
-      });
+      // Fallback: /prompts (no path segments) — 兼容旧调用方式
+      return ok(res, handleListQuery(req.query));
     }
 
     if (method === "POST") {
       // /prompts/:id/copy
-      if (first && getSecond(req) === "copy") {
+      if (first && second === "copy") {
         return ok(res, { copyCount: 1 });
       }
       // /prompts/:id/rate
-      if (first && getSecond(req) === "rate") {
+      if (first && second === "rate") {
         return ok(res, { ok: true });
       }
       // /prompts/:id/comments
-      if (first && getSecond(req) === "comments") {
+      if (first && second === "comments") {
         return ok(res, {
           id: `c_${Date.now()}`,
           promptId: first,

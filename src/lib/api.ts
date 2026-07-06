@@ -87,7 +87,7 @@ export const api = {
     Object.entries(params).forEach(([k, v]) => {
       if (v !== undefined && v !== "" && v !== null) q.set(k, String(v));
     });
-    return request<Paginated<Prompt>>(`/prompts?${q.toString()}`);
+    return request<Paginated<Prompt>>(`/prompts/list?${q.toString()}`);
   },
   prompt: (id: string) => request<Prompt>(`/prompts/${id}`),
   related: (id: string) => request<Prompt[]>(`/prompts/${id}/related`).then((v) => asArray<Prompt>(v)),
