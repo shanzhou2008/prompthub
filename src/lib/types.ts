@@ -21,6 +21,8 @@ export interface Prompt {
   source: string;
   sourceUrl?: string;
   videoUrl?: string;
+  imageUrl?: string;
+  imageLgUrl?: string;
   hue: number;
   pattern: "mesh" | "orbs" | "rings" | "waves" | "grid" | "aurora";
   viewCount: number;

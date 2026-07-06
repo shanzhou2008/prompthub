@@ -236,7 +236,7 @@ export default function PromptDetail() {
                 className="aspect-[16/10] w-full bg-ink-950"
               />
             ) : (
-              <PromptArt prompt={prompt} className="aspect-[16/10] w-full" />
+              <PromptArt prompt={prompt} className="aspect-[16/10] w-full" imageSize="detail" />
             )}
             <span
               className={cn(

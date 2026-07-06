@@ -87,6 +87,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { method } = req;
     const first = getFirst(req);
+    console.log(`[prompts] ${method} ${req.url} first="${first}" query=`, JSON.stringify(req.query));
 
     if (method === "GET") {
       // /prompts/stats
@@ -183,7 +184,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // /prompts (列表)
       const prompts = loadPrompts();
+      console.log(`[prompts list] loaded ${prompts.length} prompts from JSON`);
       const { q, type, model, tag, sort = "latest", page = "1", pageSize = "12", featured, language, authorId, projectId } = req.query;
+      console.log(`[prompts list] filters: q="${q}" type="${type}" model="${model}" tag="${tag}" sort="${sort}" page="${page}"`);
 
       let list = prompts.filter((p) => p.status === "published" && p.visibility === "public");
 

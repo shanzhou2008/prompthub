@@ -3,57 +3,36 @@ import { cn } from "@/lib/utils";
 import type { Prompt } from "@/lib/types";
 
 interface Props {
-  prompt: Pick<Prompt, "hue" | "pattern" | "type" | "title" | "content" | "contentEn" | "model" | "videoUrl">;
+  prompt: Pick<Prompt, "hue" | "pattern" | "type" | "title" | "content" | "contentEn" | "model" | "videoUrl" | "imageUrl" | "imageLgUrl">;
   className?: string;
   animated?: boolean;
-  imageSize?: "square" | "square_hd" | "portrait_4_3" | "portrait_16_9" | "landscape_4_3" | "landscape_16_9";
-  withImage?: boolean;
+  imageSize?: "card" | "detail";
   /** 是否在卡片上自动播放视频预览（hover时） */
   videoPreview?: boolean;
 }
 
-/** 来源文案映射（不暴露"抓取"字样） */
-export const SOURCE_LABELS: Record<string, string> = {
-  crawled: "精选收录",
-  submitted: "社区分享",
-  official: "官方示例",
-};
-
 /**
- * 提示词预览：生图→真实生成图，生视频→视频海报+播放，任务→抽象艺术
+ * 提示词预览：
+ * - 生图→基于提示词生成的图片
+ * - 生视频→视频关键帧图片+VIDEO标识
+ * - 任务→科技可视化图片
+ * 图片 URL 在构建时预生成，存于 prompt.imageUrl / prompt.imageLgUrl
  */
 export function PromptArt({
   prompt,
   className,
   animated = true,
-  imageSize = "landscape_16_9",
-  withImage = true,
+  imageSize = "card",
   videoPreview = false,
 }: Props) {
-  const { hue, pattern, type, title, content, contentEn, model, videoUrl } = prompt;
+  const { hue, pattern, type, title, videoUrl, imageUrl, imageLgUrl } = prompt;
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
   const [videoPlaying, setVideoPlaying] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const isVideo = type === "video" && !!videoUrl;
-  const showImage = withImage && !imgFailed;
-
-  const imgDesc = buildImageDescription(title, contentEn || content, type, model);
-  // 使用 Pollinations.ai 公网免费图片服务（无需 API key）
-  const sizeMap: Record<string, string> = {
-    square_hd: "512x512",
-    square: "768x768",
-    portrait_4_3: "768x1024",
-    portrait_16_9: "720x1280",
-    landscape_4_3: "1024x768",
-    landscape_16_9: "1280x720",
-  };
-  const dims = sizeMap[imageSize] || "1280x720";
-  const seed = hashCode(title).toString();
-  const posterSrc = `https://image.pollinations.ai/prompt/${encodeURIComponent(
-    imgDesc,
-  )}?width=${dims.split("x")[0]}&height=${dims.split("x")[1]}&seed=${seed}&nologo=true&model=flux`;
+  const src = imageSize === "detail" ? (imageLgUrl || imageUrl) : (imageUrl || imageLgUrl);
 
   const h = hue;
   const c1 = `hsl(${h} 90% 62%)`;
@@ -77,13 +56,13 @@ export function PromptArt({
         }
       }}
     >
-      {/* 底层 CSS 抽象艺术 */}
-      <CssArt hue={hue} pattern={pattern} c1={c1} c2={c2} c3={c3} />
+      {/* 底层 CSS 渐变（图片加载前/失败后的背景） */}
+      <CssFallback hue={hue} pattern={pattern} c1={c1} c2={c2} c3={c3} />
 
-      {/* 生图/视频海报/任务可视化：Pollinations 生成的图片 */}
-      {showImage && (
+      {/* 主图片：基于提示词预生成的图片 */}
+      {src && !imgFailed && (
         <img
-          src={posterSrc}
+          src={src}
           alt={title}
           loading="lazy"
           onLoad={() => setImgLoaded(true)}
@@ -125,15 +104,22 @@ export function PromptArt({
         </>
       )}
 
-      {/* 视频类型标识（无论有无 videoUrl 都显示） */}
+      {/* 视频类型标识 */}
       {type === "video" && (
-        <div className="absolute bottom-3 right-3 z-20 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[10px] text-white/80">
-          VIDEO
+        <div className="absolute bottom-3 right-3 z-20 rounded bg-black/60 px-2 py-0.5 text-[10px] font-bold text-white/90">
+          ▶ VIDEO
+        </div>
+      )}
+
+      {/* 任务类型标识 */}
+      {type === "task" && (
+        <div className="absolute bottom-3 right-3 z-20 rounded bg-black/60 px-2 py-0.5 text-[10px] font-bold text-cyan-300/90">
+          ⚡ TASK
         </div>
       )}
 
       {/* 加载中渐变遮罩 */}
-      {showImage && !imgLoaded && (
+      {src && !imgFailed && !imgLoaded && (
         <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-ink-700/40 via-ink-800/20 to-ink-700/40" />
       )}
 
@@ -150,63 +136,16 @@ export function PromptArt({
         </div>
       )}
 
-      {/* 边角类型标记 */}
-      <div className="absolute left-3 top-3 z-10 font-mono text-[10px] tracking-widest text-white/50 drop-shadow">
-        {TYPE_ICON[type] ?? "·"}
-      </div>
-      <div className="absolute right-3 top-3 z-10 font-mono text-[10px] tracking-widest text-white/50 drop-shadow">
-        H{String(hue).padStart(3, "0")}
-      </div>
-
       {/* 底部渐隐 */}
-      <div className="absolute inset-x-0 bottom-0 z-[5] h-1/3 bg-gradient-to-t from-ink-900/80 to-transparent" />
+      <div className="absolute inset-x-0 bottom-0 z-[5] h-1/4 bg-gradient-to-t from-ink-900/80 to-transparent" />
     </div>
   );
 }
 
-const TYPE_ICON: Record<string, string> = {
-  image: "IM",
-  video: "VD",
-  task: "TSK",
-};
-
-/** 字符串哈希，用于生成稳定的图片种子 */
-function hashCode(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) {
-    h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
-  }
-  return Math.abs(h);
-}
-
-function buildImageDescription(
-  title: string,
-  content: string,
-  type: string,
-  model: string,
-): string {
-  // 去掉 Midjourney / SD 等专用参数（--ar, --v, --s, --q, --w, --no, --seed 等）
-  const cleaned = (content || title)
-    .replace(/--\w+\s+\S+/g, "")   // --flag value
-    .replace(/\s{2,}/g, " ")       // 多空格合并
-    .trim()
-    .slice(0, 250);
-
-  if (type === "image") {
-    // 生图：直接用提示词内容描述，这是最精准的
-    return `${cleaned}, masterpiece, best quality, ultra detailed, cinematic lighting, 8k`;
-  }
-
-  if (type === "video") {
-    // 生视频：用内容生成视频的关键帧/画面预览
-    return `cinematic still frame from a video, ${cleaned}, photorealistic, dramatic lighting, 8k, film grain`;
-  }
-
-  // 任务类型：生成有科技感的抽象可视化
-  return `futuristic holographic interface visualization representing "${title}", glowing data streams, neural network connections, dark background with cyan and purple neon accents, abstract tech art, ultra detailed, 3d render, 8k`;
-}
-
-function CssArt({
+/**
+ * CSS 渐变背景：图片加载前/失败后的降级显示
+ */
+function CssFallback({
   hue,
   pattern,
   c1,
@@ -221,129 +160,75 @@ function CssArt({
 }) {
   if (pattern === "mesh") {
     return (
-      <>
-        <div
-          className="absolute inset-0"
-          style={{
-            background: `
-              radial-gradient(40% 50% at 20% 25%, ${c1}cc, transparent 60%),
-              radial-gradient(45% 55% at 80% 30%, ${c2}aa, transparent 65%),
-              radial-gradient(50% 60% at 60% 85%, ${c3}aa, transparent 60%)`,
-          }}
-        />
-        <div
-          className="absolute inset-0 opacity-40 mix-blend-screen"
-          style={{
-            backgroundImage:
-              "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E\")",
-          }}
-        />
-      </>
+      <div
+        className="absolute inset-0"
+        style={{
+          background: `
+            radial-gradient(40% 50% at 20% 25%, ${c1}cc, transparent 60%),
+            radial-gradient(45% 55% at 80% 30%, ${c2}aa, transparent 65%),
+            radial-gradient(50% 60% at 60% 85%, ${c3}aa, transparent 60%)`,
+        }}
+      />
     );
   }
   if (pattern === "orbs") {
     return (
-      <>
-        <div
-          className="absolute h-32 w-32 rounded-full blur-2xl animate-float"
-          style={{ background: c1, top: "10%", left: "15%", opacity: 0.85 }}
-        />
-        <div
-          className="absolute h-24 w-24 rounded-full blur-2xl animate-float"
-          style={{ background: c2, top: "45%", left: "55%", opacity: 0.75, animationDelay: "1.5s" }}
-        />
-        <div
-          className="absolute h-20 w-20 rounded-full blur-xl animate-float"
-          style={{ background: c3, bottom: "12%", left: "25%", opacity: 0.7, animationDelay: "3s" }}
-        />
-      </>
+      <div
+        className="absolute inset-0"
+        style={{
+          background: `
+            radial-gradient(30% 40% at 15% 20%, ${c1}aa, transparent 50%),
+            radial-gradient(25% 35% at 75% 40%, ${c2}88, transparent 55%),
+            radial-gradient(20% 30% at 40% 80%, ${c3}77, transparent 50%)`,
+        }}
+      />
     );
   }
   if (pattern === "rings") {
     return (
-      <div className="absolute inset-0 grid place-items-center">
-        {[0, 1, 2, 3, 4].map((i) => (
-          <div
-            key={i}
-            className="absolute rounded-full border"
-            style={{
-              width: `${30 + i * 22}%`,
-              height: `${30 + i * 22}%`,
-              borderColor: i % 2 === 0 ? `${c1}55` : `${c2}44`,
-              boxShadow: `0 0 30px -8px ${i % 2 === 0 ? c1 : c2}`,
-            }}
-          />
-        ))}
-        <div
-          className="h-16 w-16 rounded-full blur-xl"
-          style={{ background: `radial-gradient(circle, ${c1}, ${c3})` }}
-        />
-      </div>
+      <div
+        className="absolute inset-0"
+        style={{
+          background: `
+            radial-gradient(ellipse 50% 50% at 50% 50%, ${c1}44, transparent 70%),
+            radial-gradient(ellipse 70% 70% at 50% 50%, ${c2}22, transparent 80%),
+            radial-gradient(ellipse 90% 90% at 50% 50%, ${c3}11, transparent 90%)`,
+        }}
+      />
     );
   }
   if (pattern === "waves") {
     return (
-      <>
-        {[0, 1, 2, 3].map((i) => (
-          <div
-            key={i}
-            className="absolute -left-1/4 right-[-25%] h-[40%] rounded-[50%] blur-md"
-            style={{
-              bottom: `${i * 14 - 8}%`,
-              background: `linear-gradient(90deg, transparent, ${i % 2 === 0 ? c1 : c2}66, transparent)`,
-              transform: `rotate(${i % 2 === 0 ? -3 : 3}deg)`,
-            }}
-          />
-        ))}
-        <div
-          className="absolute inset-0"
-          style={{ background: `radial-gradient(60% 80% at 50% 0%, ${c1}33, transparent)` }}
-        />
-      </>
+      <div
+        className="absolute inset-0"
+        style={{
+          background: `
+            linear-gradient(170deg, ${c1}66 0%, transparent 40%),
+            linear-gradient(190deg, ${c2}44 10%, transparent 50%),
+            linear-gradient(180deg, ${c3}33 20%, transparent 60%)`,
+        }}
+      />
     );
   }
   if (pattern === "grid") {
     return (
-      <>
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage: `
-              linear-gradient(${c1}22 1px, transparent 1px),
-              linear-gradient(90deg, ${c1}22 1px, transparent 1px)`,
-            backgroundSize: "28px 28px",
-            transform: "perspective(400px) rotateX(55deg) scale(1.6)",
-            transformOrigin: "bottom",
-            maskImage: "linear-gradient(to top, black, transparent 80%)",
-          }}
-        />
-        <div
-          className="absolute inset-0"
-          style={{ background: `radial-gradient(50% 60% at 50% 30%, ${c2}55, transparent 70%)` }}
-        />
-        <div
-          className="absolute left-1/2 top-1/2 h-20 w-20 -translate-x-1/2 -translate-y-1/2 rounded-full blur-2xl"
-          style={{ background: c1 }}
-        />
-      </>
+      <div
+        className="absolute inset-0"
+        style={{
+          background: `radial-gradient(50% 60% at 50% 30%, ${c2}44, transparent 70%)`,
+        }}
+      />
     );
   }
+  // aurora / default
   return (
-    <>
-      {[0, 1, 2].map((i) => (
-        <div
-          key={i}
-          className="absolute inset-x-[-20%] h-1/2 blur-2xl animate-float"
-          style={{
-            top: `${10 + i * 18}%`,
-            background: `linear-gradient(90deg, transparent, ${[c1, c2, c3][i]}88, transparent)`,
-            transform: `skewY(${i % 2 === 0 ? -6 : 6}deg)`,
-            opacity: 0.7,
-            animationDelay: `${i * 1.2}s`,
-          }}
-        />
-      ))}
-      <div className="absolute inset-0 bg-gradient-to-t from-ink-950/70 to-transparent" />
-    </>
+    <div
+      className="absolute inset-0"
+      style={{
+        background: `
+          radial-gradient(40% 50% at 30% 20%, ${c1}88, transparent 60%),
+          radial-gradient(45% 55% at 70% 70%, ${c2}66, transparent 60%)`,
+      }}
+    />
   );
 }
