@@ -7,17 +7,25 @@ interface Props {
   className?: string;
   animated?: boolean;
   imageSize?: "card" | "detail";
-  /** 是否在卡片上自动播放视频预览（hover时） */
   videoPreview?: boolean;
 }
 
-/**
- * 提示词预览：
- * - 生图→基于提示词生成的图片
- * - 生视频→视频关键帧图片+VIDEO标识
- * - 任务→科技可视化图片
- * 图片 URL 在构建时预生成，存于 prompt.imageUrl / prompt.imageLgUrl
- */
+function generateFallbackImageUrl(title: string, type: string): string {
+  const seed = title.split("").reduce((a, b) => a + b.charCodeAt(0), 0);
+  const [w, h] = type === "video" ? [768, 432] : [768, 512];
+  
+  const keywords = title
+    .replace(/[^\u4e00-\u9fa5a-zA-Z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 1)
+    .slice(0, 6)
+    .join(" ");
+
+  const safeKeywords = encodeURIComponent(keywords);
+  
+  return `https://picsum.photos/seed/${seed}/${w}/${h}`;
+}
+
 export function PromptArt({
   prompt,
   className,
@@ -32,13 +40,16 @@ export function PromptArt({
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const isVideo = type === "video" && !!videoUrl;
-  const src = imageSize === "detail" ? (imageLgUrl || imageUrl) : (imageUrl || imageLgUrl);
+  const primarySrc = imageSize === "detail" ? (imageLgUrl || imageUrl) : (imageUrl || imageLgUrl);
+  const fallbackSrc = generateFallbackImageUrl(title, type);
 
   const h = hue;
   const c1 = `hsl(${h} 90% 62%)`;
   const c2 = `hsl(${(h + 40) % 360} 88% 58%)`;
   const c3 = `hsl(${(h + 180) % 360} 85% 55%)`;
   const dark = `hsl(${h} 60% 8%)`;
+
+  const src = imgFailed ? fallbackSrc : primarySrc;
 
   return (
     <div
@@ -56,17 +67,19 @@ export function PromptArt({
         }
       }}
     >
-      {/* 底层 CSS 渐变（图片加载前/失败后的背景） */}
       <CssFallback hue={hue} pattern={pattern} c1={c1} c2={c2} c3={c3} />
 
-      {/* 主图片：基于提示词预生成的图片 */}
-      {src && !imgFailed && (
+      {src && (
         <img
           src={src}
           alt={title}
           loading="lazy"
           onLoad={() => setImgLoaded(true)}
-          onError={() => setImgFailed(true)}
+          onError={() => {
+            if (!imgFailed) {
+              setImgFailed(true);
+            }
+          }}
           className={cn(
             "absolute inset-0 h-full w-full object-cover transition-all duration-700",
             imgLoaded ? "opacity-100 scale-100" : "opacity-0 scale-105",
@@ -74,7 +87,6 @@ export function PromptArt({
         />
       )}
 
-      {/* 有真实视频 URL 时：hover 可播放 */}
       {isVideo && (
         <>
           <video
@@ -91,7 +103,6 @@ export function PromptArt({
               videoPlaying ? "opacity-100" : "opacity-0",
             )}
           />
-          {/* 播放按钮 */}
           {!videoPlaying && (
             <div className="absolute inset-0 z-20 flex items-center justify-center">
               <div className="flex h-14 w-14 items-center justify-center rounded-full bg-black/50 backdrop-blur-md ring-2 ring-white/30 transition-transform group-hover:scale-110">
@@ -104,131 +115,77 @@ export function PromptArt({
         </>
       )}
 
-      {/* 视频类型标识 */}
       {type === "video" && (
         <div className="absolute bottom-3 right-3 z-20 rounded bg-black/60 px-2 py-0.5 text-[10px] font-bold text-white/90">
           ▶ VIDEO
         </div>
       )}
 
-      {/* 任务类型标识 */}
       {type === "task" && (
         <div className="absolute bottom-3 right-3 z-20 rounded bg-black/60 px-2 py-0.5 text-[10px] font-bold text-cyan-300/90">
           ⚡ TASK
         </div>
       )}
 
-      {/* 加载中渐变遮罩 */}
-      {src && !imgFailed && !imgLoaded && (
+      {src && !imgLoaded && (
         <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-ink-700/40 via-ink-800/20 to-ink-700/40" />
       )}
 
-      {/* 扫描线 */}
       {animated && (
         <div className="pointer-events-none absolute inset-0 overflow-hidden opacity-30">
           <div
             className="absolute inset-x-0 h-24 animate-scan"
             style={{
-              background:
-                "linear-gradient(to bottom, transparent, rgba(255,255,255,0.08), transparent)",
+              background: "linear-gradient(to bottom, transparent, rgba(255,255,255,0.08), transparent)",
             }}
           />
         </div>
       )}
 
-      {/* 底部渐隐 */}
       <div className="absolute inset-x-0 bottom-0 z-[5] h-1/4 bg-gradient-to-t from-ink-900/80 to-transparent" />
     </div>
   );
 }
 
-/**
- * CSS 渐变背景：图片加载前/失败后的降级显示
- */
-function CssFallback({
-  hue,
-  pattern,
-  c1,
-  c2,
-  c3,
-}: {
-  hue: number;
-  pattern: string;
-  c1: string;
-  c2: string;
-  c3: string;
-}) {
+function CssFallback({ hue, pattern, c1, c2, c3 }: { hue: number; pattern: string; c1: string; c2: string; c3: string }) {
   if (pattern === "mesh") {
     return (
-      <div
-        className="absolute inset-0"
-        style={{
-          background: `
-            radial-gradient(40% 50% at 20% 25%, ${c1}cc, transparent 60%),
-            radial-gradient(45% 55% at 80% 30%, ${c2}aa, transparent 65%),
-            radial-gradient(50% 60% at 60% 85%, ${c3}aa, transparent 60%)`,
-        }}
-      />
+      <div className="absolute inset-0" style={{
+        background: `radial-gradient(40% 50% at 20% 25%, ${c1}cc, transparent 60%), radial-gradient(45% 55% at 80% 30%, ${c2}aa, transparent 65%), radial-gradient(50% 60% at 60% 85%, ${c3}aa, transparent 60%)`,
+      }} />
     );
   }
   if (pattern === "orbs") {
     return (
-      <div
-        className="absolute inset-0"
-        style={{
-          background: `
-            radial-gradient(30% 40% at 15% 20%, ${c1}aa, transparent 50%),
-            radial-gradient(25% 35% at 75% 40%, ${c2}88, transparent 55%),
-            radial-gradient(20% 30% at 40% 80%, ${c3}77, transparent 50%)`,
-        }}
-      />
+      <div className="absolute inset-0" style={{
+        background: `radial-gradient(30% 40% at 15% 20%, ${c1}aa, transparent 50%), radial-gradient(25% 35% at 75% 40%, ${c2}88, transparent 55%), radial-gradient(20% 30% at 40% 80%, ${c3}77, transparent 50%)`,
+      }} />
     );
   }
   if (pattern === "rings") {
     return (
-      <div
-        className="absolute inset-0"
-        style={{
-          background: `
-            radial-gradient(ellipse 50% 50% at 50% 50%, ${c1}44, transparent 70%),
-            radial-gradient(ellipse 70% 70% at 50% 50%, ${c2}22, transparent 80%),
-            radial-gradient(ellipse 90% 90% at 50% 50%, ${c3}11, transparent 90%)`,
-        }}
-      />
+      <div className="absolute inset-0" style={{
+        background: `radial-gradient(ellipse 50% 50% at 50% 50%, ${c1}44, transparent 70%), radial-gradient(ellipse 70% 70% at 50% 50%, ${c2}22, transparent 80%), radial-gradient(ellipse 90% 90% at 50% 50%, ${c3}11, transparent 90%)`,
+      }} />
     );
   }
   if (pattern === "waves") {
     return (
-      <div
-        className="absolute inset-0"
-        style={{
-          background: `
-            linear-gradient(170deg, ${c1}66 0%, transparent 40%),
-            linear-gradient(190deg, ${c2}44 10%, transparent 50%),
-            linear-gradient(180deg, ${c3}33 20%, transparent 60%)`,
-        }}
-      />
+      <div className="absolute inset-0" style={{
+        background: `linear-gradient(170deg, ${c1}66 0%, transparent 40%), linear-gradient(190deg, ${c2}44 10%, transparent 50%), linear-gradient(180deg, ${c3}33 20%, transparent 60%)`,
+      }} />
     );
   }
   if (pattern === "grid") {
     return (
-      <div
-        className="absolute inset-0"
-        style={{
-          background: `radial-gradient(50% 60% at 50% 30%, ${c2}44, transparent 70%)`,
-        }}
-      />
+      <div className="absolute inset-0" style={{
+        background: `radial-gradient(50% 60% at 50% 30%, ${c2}44, transparent 70%)`,
+      }} />
     );
   }
-  // aurora / default
   return (
-    <div
-      className="absolute inset-0"
-      style={{
-        background: `
-          radial-gradient(40% 50% at 30% 20%, ${c1}88, transparent 60%),
-          radial-gradient(45% 55% at 70% 70%, ${c2}66, transparent 60%)`,
-      }}
-    />
+    <div className="absolute inset-0" style={{
+      background: `radial-gradient(40% 50% at 30% 20%, ${c1}88, transparent 60%), radial-gradient(45% 55% at 70% 70%, ${c2}66, transparent 60%)`,
+    }} />
   );
 }
