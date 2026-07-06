@@ -61,11 +61,32 @@ function fail(res: VercelResponse, status: number, error: string) {
   return res.status(status).json({ success: false, error });
 }
 
+function getFirst(req: VercelRequest): string {
+  const raw = req.query.path;
+  const parts = Array.isArray(raw) ? raw : raw ? [String(raw)] : [];
+  if (parts[0]) return parts[0];
+  const url = req.url || "";
+  const m = url.match(/\/api\/prompts\/([^/?]+)/);
+  return m ? m[1] : "";
+}
+
+function getSecond(req: VercelRequest): string {
+  const raw = req.query.path;
+  const parts = Array.isArray(raw) ? raw : raw ? [String(raw)] : [];
+  if (parts[1]) return parts[1];
+  const url = req.url || "";
+  const m = url.match(/\/api\/prompts\/[^/?]+\/([^/?]+)/);
+  return m ? m[1] : "";
+}
+
+function hasSecond(req: VercelRequest): boolean {
+  return !!getSecond(req);
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { method } = req;
-    const pathParts = (req.query.path as string[] | undefined) || [];
-    const first = pathParts[0];
+    const first = getFirst(req);
 
     if (method === "GET") {
       // /prompts/stats
@@ -120,7 +141,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       // /prompts/:id/related
-      if (first && pathParts.length === 2 && pathParts[1] === "related") {
+      if (first && getSecond(req) === "related") {
         const prompts = loadPrompts();
         const target = prompts.find((p) => p.id === first);
         if (!target) return fail(res, 404, "Not found");
@@ -145,13 +166,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       // /prompts/:id/comments
-      if (first && pathParts.length === 2 && pathParts[1] === "comments") {
+      if (first && getSecond(req) === "comments") {
         // 静态数据无评论，返回空数组
         return ok(res, []);
       }
 
       // /prompts/:id
-      if (first && pathParts.length === 1) {
+      if (first && !hasSecond(req)) {
         const prompts = loadPrompts();
         const prompt = prompts.find(
           (p) => p.id === first && p.status === "published" && p.visibility === "public",
@@ -213,15 +234,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (method === "POST") {
       // /prompts/:id/copy
-      if (first && pathParts.length === 2 && pathParts[1] === "copy") {
+      if (first && getSecond(req) === "copy") {
         return ok(res, { copyCount: 1 });
       }
       // /prompts/:id/rate
-      if (first && pathParts.length === 2 && pathParts[1] === "rate") {
+      if (first && getSecond(req) === "rate") {
         return ok(res, { ok: true });
       }
       // /prompts/:id/comments
-      if (first && pathParts.length === 2 && pathParts[1] === "comments") {
+      if (first && getSecond(req) === "comments") {
         return ok(res, {
           id: `c_${Date.now()}`,
           promptId: first,
