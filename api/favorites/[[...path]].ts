@@ -46,6 +46,24 @@ function getUserFromRequest(req: VercelRequest): User | null {
   return loadUsers().find((u) => u.id === session.userId) || null;
 }
 
+function getFirst(req: VercelRequest): string {
+  const raw = req.query.path;
+  const parts = Array.isArray(raw) ? raw : raw ? [String(raw)] : [];
+  if (parts[0]) return parts[0];
+  const url = req.url || "";
+  const m = url.match(/\/api\/favorites\/([^/?]+)/);
+  return m ? m[1] : "";
+}
+
+function getSecond(req: VercelRequest): string {
+  const raw = req.query.path;
+  const parts = Array.isArray(raw) ? raw : raw ? [String(raw)] : [];
+  if (parts[1]) return parts[1];
+  const url = req.url || "";
+  const m = url.match(/\/api\/favorites\/[^/?]+\/([^/?]+)/);
+  return m ? m[1] : "";
+}
+
 function ok(res: VercelResponse, data: unknown) {
   return res.status(200).json({ success: true, data });
 }
@@ -56,8 +74,7 @@ function fail(res: VercelResponse, status: number, error: string) {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { method } = req;
-    const pathParts = (req.query.path as string[] | undefined) || [];
-    const first = pathParts[0];
+    const first = getFirst(req);
     const user = getUserFromRequest(req);
 
     if (method === "GET") {
@@ -135,8 +152,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (method === "DELETE") {
-      if (first === "collections" && pathParts[1]) {
-        const collectionId = pathParts[1];
+      if (first === "collections" && getSecond(req)) {
+        const collectionId = getSecond(req);
         const idx = collections.findIndex((c) => c.id === collectionId && c.userId === user.id);
         if (idx > -1) collections.splice(idx, 1);
         return ok(res, null);

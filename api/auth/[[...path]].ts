@@ -44,11 +44,20 @@ function publicUser(u: User) {
   return { id: u.id, username: u.username, email: u.email, phone: u.phone, avatar: u.avatar ?? "", role: u.role, createdAt: u.createdAt };
 }
 
+function getAction(req: VercelRequest): string {
+  const raw = req.query.path;
+  const parts = Array.isArray(raw) ? raw : raw ? [String(raw)] : [];
+  if (parts[0]) return parts[0];
+  // 后备：从 url 解析
+  const url = req.url || "";
+  const m = url.match(/\/api\/auth\/([^/?]+)/);
+  return m ? m[1] : "";
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const { method } = req;
-    const pathParts = (req.query.path as string[] | undefined) || [];
-    const action = pathParts[0];
+    const action = getAction(req);
 
     if (method === "POST") {
       if (action === "login") {

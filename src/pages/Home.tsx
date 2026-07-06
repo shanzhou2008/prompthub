@@ -55,12 +55,12 @@ export default function Home() {
   const [email, setEmail] = useState("");
 
   useEffect(() => {
-    Promise.all([api.stats(), api.daily(), api.latest(), api.trending()])
+    Promise.allSettled([api.stats(), api.daily(), api.latest(), api.trending()])
       .then(([s, d, l, t]) => {
-        setStats(s);
-        setDaily(d);
-        setLatest(l);
-        setTrending(t);
+        if (s.status === "fulfilled") setStats(s.value);
+        if (d.status === "fulfilled") setDaily(d.value);
+        if (l.status === "fulfilled") setLatest(l.value);
+        if (t.status === "fulfilled") setTrending(t.value);
       })
       .finally(() => setLoading(false));
   }, []);
