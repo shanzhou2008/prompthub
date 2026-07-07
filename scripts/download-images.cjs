@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const https = require("https");
+const { execSync } = require("child_process");
 
 const DATA_DIR = path.join(process.cwd(), "api", "data");
 const IMAGES_DIR = path.join(process.cwd(), "public", "images");
@@ -11,136 +11,64 @@ if (!fs.existsSync(IMAGES_DIR)) {
 
 const prompts = JSON.parse(fs.readFileSync(path.join(DATA_DIR, "prompts.json"), "utf8"));
 
-const SKIP_EXISTING = true;
-const MAX_CONCURRENT = 3;
-const RETRIES = 2;
-const TIMEOUT_MS = 60000;
-const REQUEST_DELAY_MS = 800;
-
-function downloadImage(url, destPath) {
-  return new Promise((resolve, reject) => {
-    const req = https.get(url, { timeout: TIMEOUT_MS, headers: { "User-Agent": "Mozilla/5.0" } }, (res) => {
-      if (res.statusCode === 302 || res.statusCode === 301) {
-        const redirectUrl = res.headers.location;
-        if (!redirectUrl) {
-          reject(new Error("Redirect without location"));
-          return;
-        }
-        downloadImage(redirectUrl, destPath).then(resolve).catch(reject);
-        return;
-      }
-      if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode}`));
-        return;
-      }
-      const file = fs.createWriteStream(destPath);
-      res.pipe(file);
-      file.on("finish", () => {
-        file.close();
-        resolve();
-      });
-      file.on("error", (err) => {
-        file.destroy();
-        if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
-        reject(err);
-      });
-    });
-    req.on("error", (err) => {
-      if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
-      reject(err);
-    });
-    req.on("timeout", () => {
-      req.destroy();
-      if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
-      reject(new Error("Timeout"));
-    });
-  });
-}
-
-async function downloadWithRetry(url, destPath) {
-  for (let i = 0; i <= RETRIES; i++) {
-    try {
-      await downloadImage(url, destPath);
-      return true;
-    } catch (err) {
-      if (i === RETRIES) return false;
-      await new Promise((r) => setTimeout(r, REQUEST_DELAY_MS * (i + 1)));
-    }
+function downloadWithCurl(url, destPath) {
+  try {
+    execSync(`curl -s --max-time 30 -o "${destPath}" "${url}"`, { stdio: "pipe" });
+    const size = fs.statSync(destPath).size;
+    return size > 1000;
+  } catch {
+    return false;
   }
-  return false;
 }
 
-async function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-async function main() {
+function main() {
   let toDownload = [];
   for (const p of prompts) {
     if (!p.imageUrl) continue;
     const dest = path.join(IMAGES_DIR, `${p.id}.jpg`);
-    if (SKIP_EXISTING && fs.existsSync(dest)) {
-      console.log(`[SKIP] ${p.id} (exists)`);
-      continue;
-    }
-    toDownload.push({ id: p.id, url: p.imageUrl, dest });
+    if (fs.existsSync(dest) && fs.statSync(dest).size > 1000) continue;
+    
+    const url = p.imageUrl
+      .replace("width=768&height=512", "width=400&height=300")
+      .replace("width=1280&height=720", "width=800&height=600");
+    toDownload.push({ id: p.id, url, dest });
   }
 
-  console.log(`\nTotal to download: ${toDownload.length}`);
-  console.log(`Concurrent: ${MAX_CONCURRENT}, Retries: ${RETRIES}, Timeout: ${TIMEOUT_MS}ms\n`);
-
+  console.log(`Total to download: ${toDownload.length}`);
   const start = Date.now();
-  let success = 0;
-  let failed = 0;
-  const failedList = [];
+  let success = 0, failed = 0;
 
-  for (let i = 0; i < toDownload.length; i += MAX_CONCURRENT) {
-    const batch = toDownload.slice(i, i + MAX_CONCURRENT);
-    const batchPromises = batch.map(async (item) => {
-      const result = await downloadWithRetry(item.url, item.dest);
-      if (result) {
-        const size = fs.statSync(item.dest).size;
-        console.log(`[OK] ${item.id} (${(size / 1024).toFixed(1)}KB)`);
-        return { success: true };
-      } else {
-        console.log(`[FAIL] ${item.id}`);
-        failedList.push(item.id);
-        return { success: false };
-      }
-    });
-
-    const results = await Promise.all(batchPromises);
-    success += results.filter((r) => r.success).length;
-    failed += results.filter((r) => !r.success).length;
-
-    await sleep(REQUEST_DELAY_MS);
+  for (let i = 0; i < toDownload.length; i++) {
+    const item = toDownload[i];
+    let ok = false;
+    for (let retry = 0; retry < 2; retry++) {
+      ok = downloadWithCurl(item.url, item.dest);
+      if (ok) break;
+    }
+    if (ok) success++;
+    else { failed++; if (fs.existsSync(item.dest)) fs.unlinkSync(item.dest); }
+    
+    if ((i + 1) % 10 === 0 || i === toDownload.length - 1) {
+      process.stdout.write(`\rProgress: ${i + 1}/${toDownload.length} (OK:${success} FAIL:${failed})`);
+    }
   }
 
-  const elapsed = (Date.now() - start) / 1000;
-  console.log(`\n=== Done ===`);
-  console.log(`Success: ${success}, Failed: ${failed}, Time: ${elapsed.toFixed(1)}s`);
+  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+  console.log(`\nDone: ${success} OK, ${failed} failed, ${elapsed}s`);
 
-  if (failedList.length > 0) {
-    fs.writeFileSync(path.join(DATA_DIR, "failed-images.json"), JSON.stringify(failedList, null, 2));
-    console.log(`Failed list saved to: failed-images.json`);
-  }
-
-  let updatedCount = 0;
+  // Update prompts.json to use local paths
   const updated = prompts.map((p) => {
     const localPath = `/images/${p.id}.jpg`;
-    const hasLocal = fs.existsSync(path.join(IMAGES_DIR, `${p.id}.jpg`));
-    if (hasLocal) updatedCount++;
+    const hasLocal = fs.existsSync(path.join(IMAGES_DIR, `${p.id}.jpg`)) && 
+                     fs.statSync(path.join(IMAGES_DIR, `${p.id}.jpg`)).size > 1000;
     return {
       ...p,
       imageUrl: hasLocal ? localPath : p.imageUrl,
       imageLgUrl: hasLocal ? localPath : p.imageLgUrl,
     };
   });
-  fs.writeFileSync(path.join(DATA_DIR, "prompts.json"), JSON.stringify(updated, null, 2));
-  console.log(`Updated ${updatedCount}/${prompts.length} prompts with local paths.`);
+  fs.writeFileSync(path.join(DATA_DIR, "prompts.json"), JSON.stringify(updated));
+  console.log(`Updated prompts.json with local paths`);
 }
 
-main().catch((err) => {
-  console.error("Fatal error:", err);
-  process.exit(1);
-});
+main();

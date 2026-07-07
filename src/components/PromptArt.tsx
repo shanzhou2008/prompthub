@@ -3,27 +3,25 @@ import { cn } from "@/lib/utils";
 import type { Prompt } from "@/lib/types";
 
 interface Props {
-  prompt: Pick<Prompt, "hue" | "pattern" | "type" | "title" | "content" | "contentEn" | "model" | "videoUrl" | "imageUrl" | "imageLgUrl">;
+  prompt: Pick<Prompt, "id" | "hue" | "pattern" | "type" | "title" | "content" | "contentEn" | "model" | "videoUrl" | "imageUrl" | "imageLgUrl">;
   className?: string;
   animated?: boolean;
   imageSize?: "card" | "detail";
   videoPreview?: boolean;
 }
 
-function generateFallbackImageUrl(title: string, type: string): string {
-  const seed = title.split("").reduce((a, b) => a + b.charCodeAt(0), 0);
-  const [w, h] = type === "video" ? [768, 432] : [768, 512];
-  
-  const keywords = title
-    .replace(/[^\u4e00-\u9fa5a-zA-Z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length > 1)
-    .slice(0, 6)
-    .join(" ");
-
-  const safeKeywords = encodeURIComponent(keywords);
-  
-  return `https://picsum.photos/seed/${seed}/${w}/${h}`;
+/**
+ * 构建图片 URL：
+ * - 本地图片（/images/xxx.jpg）直接使用
+ * - Pollinations URL 通过 /api/img 代理（Vercel 服务器在美国，可以访问 Pollinations）
+ */
+function buildImageUrl(prompt: Props["prompt"], size: "card" | "detail"): string {
+  const raw = size === "detail" ? (prompt.imageLgUrl || prompt.imageUrl) : (prompt.imageUrl || prompt.imageLgUrl);
+  if (!raw) return "";
+  // 本地图片直接使用
+  if (raw.startsWith("/images/")) return raw;
+  // Pollinations URL → 通过 Vercel 代理
+  return `/api/img?id=${encodeURIComponent(prompt.id)}&size=${size}`;
 }
 
 export function PromptArt({
@@ -33,23 +31,20 @@ export function PromptArt({
   imageSize = "card",
   videoPreview = false,
 }: Props) {
-  const { hue, pattern, type, title, videoUrl, imageUrl, imageLgUrl } = prompt;
+  const { hue, pattern, type, title, videoUrl } = prompt;
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgFailed, setImgFailed] = useState(false);
   const [videoPlaying, setVideoPlaying] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const isVideo = type === "video" && !!videoUrl;
-  const primarySrc = imageSize === "detail" ? (imageLgUrl || imageUrl) : (imageUrl || imageLgUrl);
-  const fallbackSrc = generateFallbackImageUrl(title, type);
+  const primarySrc = buildImageUrl(prompt, imageSize);
 
   const h = hue;
   const c1 = `hsl(${h} 90% 62%)`;
   const c2 = `hsl(${(h + 40) % 360} 88% 58%)`;
   const c3 = `hsl(${(h + 180) % 360} 85% 55%)`;
   const dark = `hsl(${h} 60% 8%)`;
-
-  const src = imgFailed ? fallbackSrc : primarySrc;
 
   return (
     <div
@@ -69,17 +64,13 @@ export function PromptArt({
     >
       <CssFallback hue={hue} pattern={pattern} c1={c1} c2={c2} c3={c3} />
 
-      {src && (
+      {primarySrc && !imgFailed && (
         <img
-          src={src}
+          src={primarySrc}
           alt={title}
           loading="lazy"
           onLoad={() => setImgLoaded(true)}
-          onError={() => {
-            if (!imgFailed) {
-              setImgFailed(true);
-            }
-          }}
+          onError={() => setImgFailed(true)}
           className={cn(
             "absolute inset-0 h-full w-full object-cover transition-all duration-700",
             imgLoaded ? "opacity-100 scale-100" : "opacity-0 scale-105",
@@ -127,7 +118,7 @@ export function PromptArt({
         </div>
       )}
 
-      {src && !imgLoaded && (
+      {primarySrc && !imgLoaded && !imgFailed && (
         <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-ink-700/40 via-ink-800/20 to-ink-700/40" />
       )}
 
