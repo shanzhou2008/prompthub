@@ -12,28 +12,141 @@ function hashCode(s) {
   return Math.abs(h);
 }
 
-// 从提示词内容生成简洁的图片描述（去掉 MJ/SD 参数，缩短到关键画面描述）
+// 从提示词内容生成高质量图片描述
 function buildImagePrompt(title, content, contentZh, type) {
-  // 去掉 Midjourney / SD 专用参数
-  const cleaned = (content || title)
+  const cleanedEn = (content || '')
     .replace(/--\w+\s+\S+/g, '')
+    .replace(/\{[\w]+\}/g, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
 
+  const cleanedZh = (contentZh || '').replace(/\{[\w]+\}/g, '').replace(/\s{2,}/g, ' ').trim();
+
+  const titleEn = title.replace(/\{[\w]+\}/g, '').trim();
+  const titleZh = title.replace(/\{[\w]+\}/g, '').trim();
+
+  const isChinese = cleanedZh.length > cleanedEn.length;
+
   if (type === 'image') {
-    // 生图：用核心描述（取前 150 字符），加质量词
-    const core = cleaned.slice(0, 150);
-    return `${core}, masterpiece, best quality, ultra detailed`;
+    let core;
+    if (isChinese) {
+      core = cleanedZh.slice(0, 120) || titleZh;
+    } else {
+      core = cleanedEn.slice(0, 150) || titleEn;
+    }
+
+    const styleWords = [
+      'ultra realistic',
+      'photorealistic',
+      '8k',
+      'ultra detailed',
+      'cinematic lighting',
+      'professional photography',
+      'masterpiece',
+      'best quality',
+      'sharp focus',
+      'high contrast',
+    ];
+
+    if (core.includes('portrait') || core.includes('人像') || core.includes('face') || core.includes('woman') || core.includes('man')) {
+      styleWords.push('beautiful face', 'elegant', 'soft lighting', 'bokeh', 'professional portrait');
+    }
+    if (core.includes('landscape') || core.includes('风景') || core.includes('mountains') || core.includes('ocean') || core.includes('sea')) {
+      styleWords.push('epic landscape', 'vast', 'majestic', 'golden hour', 'natural lighting');
+    }
+    if (core.includes('anime') || core.includes('动漫') || core.includes('manga') || core.includes('ghibli') || core.includes('吉卜力')) {
+      styleWords.push('anime style', 'studio ghibli', 'vibrant colors', 'detailed background');
+    }
+    if (core.includes('cyberpunk') || core.includes('赛博') || core.includes('neon')) {
+      styleWords.push('cyberpunk', 'neon lighting', 'futuristic', 'dystopian', 'blade runner');
+    }
+    if (core.includes('food') || core.includes('美食') || core.includes('cake') || core.includes('sushi') || core.includes('ramen')) {
+      styleWords.push('food photography', 'appetizing', 'warm lighting', 'professional food styling');
+    }
+    if (core.includes('product') || core.includes('产品') || core.includes('perfume') || core.includes('watch') || core.includes('phone')) {
+      styleWords.push('product photography', 'studio lighting', 'clean background', 'premium', 'luxury');
+    }
+    if (core.includes('concept art') || core.includes('概念') || core.includes('fantasy') || core.includes('dragon') || core.includes('phoenix')) {
+      styleWords.push('concept art', 'fantasy art', 'epic', 'dramatic', 'cinematic');
+    }
+    if (core.includes('architecture') || core.includes('建筑') || core.includes('building') || core.includes('house')) {
+      styleWords.push('architectural photography', 'modern design', 'clean lines', 'professional');
+    }
+    if (core.includes('animal') || core.includes('动物') || core.includes('wildlife') || core.includes('cat') || core.includes('dog')) {
+      styleWords.push('wildlife photography', 'natural behavior', 'professional', 'sharp detail');
+    }
+    if (core.includes('sci-fi') || core.includes('科幻') || core.includes('space') || core.includes('robot')) {
+      styleWords.push('sci-fi', 'futuristic', 'cinematic', 'detailed', 'immersive');
+    }
+
+    return `${core}, ${styleWords.join(', ')}`;
   }
 
   if (type === 'video') {
-    // 生视频：生成视频关键帧，更像电影截图
-    const core = cleaned.slice(0, 150);
-    return `cinematic still frame, ${core}, photorealistic, dramatic lighting, 8k`;
+    let core;
+    if (isChinese) {
+      core = cleanedZh.slice(0, 100) || titleZh;
+    } else {
+      core = cleanedEn.slice(0, 150) || titleEn;
+    }
+
+    const styleWords = [
+      'cinematic still frame',
+      'movie scene',
+      'film still',
+      'ultra realistic',
+      '8k',
+      'photorealistic',
+      'dramatic lighting',
+      'professional cinematography',
+      'cinematic composition',
+      'high quality',
+    ];
+
+    if (core.includes('timelapse') || core.includes('延时') || core.includes('sunrise') || core.includes('sunset')) {
+      styleWords.push('time-lapse photography', 'golden hour', 'dramatic sky');
+    }
+    if (core.includes('aerial') || core.includes('航拍') || core.includes('drone')) {
+      styleWords.push('aerial photography', 'drone shot', 'cinematic aerial');
+    }
+    if (core.includes('slow motion') || core.includes('慢动作') || core.includes('slowmo')) {
+      styleWords.push('slow motion', 'high speed photography', 'freeze frame');
+    }
+    if (core.includes('underwater') || core.includes('水下') || core.includes('ocean')) {
+      styleWords.push('underwater photography', 'marine life', 'blue water');
+    }
+    if (core.includes('sports') || core.includes('运动') || core.includes('basketball') || core.includes('surf')) {
+      styleWords.push('sports photography', 'action shot', 'dynamic motion');
+    }
+    if (core.includes('dance') || core.includes('舞蹈') || core.includes('ballet')) {
+      styleWords.push('dance photography', 'elegant movement', 'graceful');
+    }
+    if (core.includes('abstract') || core.includes('抽象') || core.includes('fluid') || core.includes('particles')) {
+      styleWords.push('abstract art', 'visual effects', 'creative', 'artistic');
+    }
+    if (core.includes('fashion') || core.includes('时尚') || core.includes('model')) {
+      styleWords.push('fashion photography', 'editorial', 'high fashion');
+    }
+
+    return `${core}, ${styleWords.join(', ')}`;
   }
 
-  // 任务类型：科技可视化
-  return `futuristic holographic dashboard for "${title}", dark UI, neon cyan and purple, abstract data visualization, ultra detailed`;
+  const taskStyleWords = [
+    'futuristic holographic interface',
+    'dark background',
+    'neon cyan and purple',
+    'abstract data visualization',
+    'digital HUD',
+    'technology',
+    'modern UI',
+    'glowing elements',
+    'sci-fi aesthetic',
+    'ultra detailed',
+    '8k',
+    'cinematic lighting',
+  ];
+
+  return `${titleEn || titleZh}, ${taskStyleWords.join(', ')}`;
 }
 
 // 生成 Pollinations 图片 URL

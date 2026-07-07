@@ -230,6 +230,14 @@ export default function Home() {
 /** 每日精选横向卡片 */
 function FeaturedCard({ prompt }: { prompt: Prompt }) {
   const meta = typeMeta(prompt.type);
+  const [imgLoaded, setImgLoaded] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
+
+  const h = prompt.hue;
+  const c1 = `hsl(${h} 90% 62%)`;
+  const c2 = `hsl(${(h + 40) % 360} 88% 58%)`;
+  const c3 = `hsl(${(h + 180) % 360} 85% 55%)`;
+
   return (
     <Link
       to={`/prompt/${prompt.id}`}
@@ -239,19 +247,37 @@ function FeaturedCard({ prompt }: { prompt: Prompt }) {
         <div
           className="absolute inset-0"
           style={{
-            background: `radial-gradient(40% 50% at 20% 25%, hsl(${prompt.hue} 90% 62%), transparent 60%),
-              radial-gradient(45% 55% at 80% 30%, hsl(${(prompt.hue + 40) % 360} 88% 58%), transparent 65%),
-              radial-gradient(50% 60% at 60% 85%, hsl(${(prompt.hue + 180) % 360} 85% 55%), transparent 60%)`,
+            background: `radial-gradient(40% 50% at 20% 25%, ${c1}cc, transparent 60%),
+              radial-gradient(45% 55% at 80% 30%, ${c2}aa, transparent 65%),
+              radial-gradient(50% 60% at 60% 85%, ${c3}aa, transparent 60%)`,
           }}
         />
+        {prompt.imageUrl && !imgFailed && (
+          <img
+            src={prompt.imageUrl.startsWith("/images/") ? prompt.imageUrl : `/api/img?id=${encodeURIComponent(prompt.id)}&size=card`}
+            alt={prompt.title}
+            loading="lazy"
+            onLoad={() => setImgLoaded(true)}
+            onError={() => setImgFailed(true)}
+            className={cn(
+              "absolute inset-0 h-full w-full object-cover transition-all duration-700",
+              imgLoaded ? "opacity-100 scale-100" : "opacity-0 scale-105",
+            )}
+          />
+        )}
         <span
           className={cn(
-            "absolute left-3 top-3 rounded-md bg-gradient-to-r px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white",
+            "absolute left-3 top-3 z-10 rounded-md bg-gradient-to-r px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white",
             meta.color,
           )}
         >
           {meta.label}
         </span>
+        {prompt.type === "video" && (
+          <div className="absolute bottom-2 right-2 z-10 rounded bg-black/60 px-2 py-0.5 text-[10px] font-bold text-white/90">
+            ▶ VIDEO
+          </div>
+        )}
       </div>
       <div className="flex flex-1 flex-col p-4">
         <div className="mb-1 text-[11px] text-mist-400">{prompt.model}</div>
