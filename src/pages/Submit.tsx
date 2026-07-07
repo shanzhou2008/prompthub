@@ -456,6 +456,7 @@ export default function Submit() {
               <div className="overflow-hidden rounded-xl border border-white/10">
                 <PromptArt
                   prompt={{
+                    id: "preview",
                     hue,
                     pattern: pattern as any,
                     type: type as any,
