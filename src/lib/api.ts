@@ -14,8 +14,6 @@ import type {
   User,
 } from "./types";
 
-const BASE = "/api";
-
 let token: string | null = localStorage.getItem("ph_token");
 
 export function setToken(t: string | null) {
@@ -28,176 +26,184 @@ export function getToken() {
   return token;
 }
 
-async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(opts.headers as Record<string, string>),
-  };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${BASE}${path}`, { ...opts, headers });
-  const text = await res.text();
-  let json: any;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    throw new Error(`API 返回非 JSON: ${text.slice(0, 100)}`);
-  }
-  if (!res.ok || !json.success) {
-    throw new Error(json.error || `请求失败 (${res.status})`);
-  }
-  return json.data as T;
-}
-
-/** 确保返回数组，防止 API 返回非数组导致 .slice 崩溃 */
 function asArray<T>(v: any): T[] {
   if (Array.isArray(v)) return v as T[];
   if (v == null) return [];
-  console.warn("Expected array but got:", typeof v, v);
   return [];
+}
+
+// 缓存全部提示词
+let _allPrompts: Prompt[] | null = null;
+
+async function loadAllPrompts(): Promise<Prompt[]> {
+  if (_allPrompts) return _allPrompts;
+  try {
+    const res = await fetch("/data/prompts.json");
+    const data = await res.json();
+    _allPrompts = asArray<Prompt>(data);
+    return _allPrompts;
+  } catch {
+    return [];
+  }
+}
+
+async function loadJSON<T>(path: string): Promise<T> {
+  try {
+    const res = await fetch(path);
+    return await res.json();
+  } catch {
+    return null as T;
+  }
 }
 
 // ---- Auth ----
 export const api = {
   login: (account: string, password: string) =>
-    request<{ token: string; user: User }>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ account, password }),
-    }),
+    Promise.resolve({ token: "demo-token", user: { id: "demo", username: account } as User }),
   loginSms: (phone: string, code: string) =>
-    request<{ token: string; user: User }>("/auth/login-sms", {
-      method: "POST",
-      body: JSON.stringify({ phone, code }),
-    }),
+    Promise.resolve({ token: "demo-token", user: { id: "demo", username: phone } as User }),
   sendCode: (phone: string) =>
-    request<{ phone: string; hint: string }>("/auth/send-code", {
-      method: "POST",
-      body: JSON.stringify({ phone }),
-    }),
+    Promise.resolve({ phone, hint: "验证码已发送" }),
   register: (body: { email?: string; phone?: string; username: string; password: string; code?: string }) =>
-    request<{ token: string; user: User }>("/auth/register", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  logout: () => request("/auth/logout", { method: "POST" }),
-  me: () => request<User>("/auth/me"),
+    Promise.resolve({ token: "demo-token", user: { id: "demo", username: body.username } as User }),
+  logout: () => Promise.resolve(),
+  me: () => Promise.resolve(null as User),
 
   // ---- Prompts ----
-  listPrompts: (params: Record<string, string | number | boolean | undefined>) => {
-    const q = new URLSearchParams();
-    Object.entries(params).forEach(([k, v]) => {
-      if (v !== undefined && v !== "" && v !== null) q.set(k, String(v));
-    });
-    return request<Paginated<Prompt>>(`/prompts/list?${q.toString()}`);
+  listPrompts: async (params: Record<string, string | number | boolean | undefined>): Promise<Paginated<Prompt>> => {
+    const all = await loadAllPrompts();
+    const { q, type, model, tag, sort = "latest", page = 1, pageSize = 12 } = params;
+
+    let result = [...all];
+
+    if (type) result = result.filter((p) => p.type === type);
+    if (model) result = result.filter((p) => p.model === model);
+    if (tag) result = result.filter((p) => p.tags && p.tags.includes(tag as string));
+    if (q) {
+      const lower = String(q).toLowerCase();
+      result = result.filter(
+        (p) =>
+          p.title.toLowerCase().includes(lower) ||
+          p.content.toLowerCase().includes(lower) ||
+          (p.contentZh && p.contentZh.includes(q as string)),
+      );
+    }
+
+    if (sort === "trending") result.sort((a, b) => (b.copyCount || 0) - (a.copyCount || 0));
+    else if (sort === "rating") result.sort((a, b) => (b.ratingAvg || 0) - (a.ratingAvg || 0));
+    else if (sort === "random") result.sort(() => Math.random() - 0.5);
+    else result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    const total = result.length;
+    const p = Number(page);
+    const ps = Number(pageSize);
+    const start = (p - 1) * ps;
+    const data = result.slice(start, start + ps);
+
+    return { data, total, page: p, pageSize: ps, hasMore: start + data.length < total };
   },
-  prompt: (id: string) => request<Prompt>(`/prompts/${id}`),
-  related: (id: string) => request<Prompt[]>(`/prompts/${id}/related`).then((v) => asArray<Prompt>(v)),
-  comments: (id: string) => request<Comment[]>(`/prompts/${id}/comments`).then((v) => asArray<Comment>(v)),
-  daily: () => request<Prompt[]>("/prompts/daily").then((v) => asArray<Prompt>(v)),
-  trending: () => request<Prompt[]>("/prompts/trending").then((v) => asArray<Prompt>(v)),
-  latest: () => request<Prompt[]>("/prompts/latest").then((v) => asArray<Prompt>(v)),
-  stats: () => request<Stats>("/prompts/stats"),
-  filters: () =>
-    request<{ models: ModelInfo[]; tags: TagInfo[] }>("/prompts/filters").then((r) => ({
+
+  prompt: async (id: string): Promise<Prompt> => {
+    const all = await loadAllPrompts();
+    const p = all.find((x) => x.id === id);
+    if (!p) throw new Error("提示词不存在");
+    return p;
+  },
+
+  related: async (id: string): Promise<Prompt[]> => {
+    const all = await loadAllPrompts();
+    const prompt = all.find((x) => x.id === id);
+    if (!prompt) return [];
+    return all
+      .filter((p) => p.id !== id && p.type === prompt.type)
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 6);
+  },
+
+  comments: (_id: string) => Promise.resolve([] as Comment[]),
+
+  daily: () => loadJSON<Prompt[]>("/data/daily.json").then((v) => asArray<Prompt>(v)),
+  trending: () => loadJSON<Prompt[]>("/data/trending.json").then((v) => asArray<Prompt>(v)),
+  latest: () => loadJSON<Prompt[]>("/data/latest.json").then((v) => asArray<Prompt>(v)),
+  stats: () => loadJSON<Stats>("/data/stats.json"),
+
+  filters: async () => {
+    const r = await loadJSON<{ models: ModelInfo[]; tags: TagInfo[] }>("/data/filters.json");
+    return {
       models: asArray<ModelInfo>(r?.models),
       tags: asArray<TagInfo>(r?.tags),
-    })),
-  recordCopy: (id: string) =>
-    request<{ copyCount: number }>(`/prompts/${id}/copy`, { method: "POST" }),
-  rate: (id: string, score: number) =>
-    request(`/prompts/${id}/rate`, { method: "POST", body: JSON.stringify({ score }) }),
-  postComment: (id: string, content: string) =>
-    request<Comment>(`/prompts/${id}/comments`, {
-      method: "POST",
-      body: JSON.stringify({ content }),
-    }),
+    };
+  },
 
-  // ---- Favorites (with collections) ----
-  favorites: (collectionId?: string) =>
-    request<Prompt[]>(`/favorites${collectionId ? `?collectionId=${collectionId}` : ""}`).then((v) => asArray<Prompt>(v)),
-  favoriteIds: () => request<string[]>("/favorites/ids").then((v) => asArray<string>(v)),
-  toggleFavorite: (promptId: string, collectionId?: string) =>
-    request<{ favorited: boolean }>("/favorites", {
-      method: "POST",
-      body: JSON.stringify({ promptId, collectionId }),
-    }),
-  moveFavorite: (promptId: string, collectionId?: string) =>
-    request(`/favorites/${promptId}`, {
-      method: "PUT",
-      body: JSON.stringify({ collectionId }),
-    }),
-  collections: () => request<(Collection & { count: number })[]>("/favorites/collections").then((v) => asArray<Collection & { count: number }>(v)),
-  createCollection: (name: string, icon?: string) =>
-    request<Collection>("/favorites/collections", {
-      method: "POST",
-      body: JSON.stringify({ name, icon }),
-    }),
-  deleteCollection: (id: string) =>
-    request(`/favorites/collections/${id}`, { method: "DELETE" }),
+  recordCopy: (_id: string) => Promise.resolve({ copyCount: 0 }),
+  rate: (_id: string, _score: number) => Promise.resolve(),
+  postComment: (_id: string, _content: string) => Promise.resolve({} as Comment),
 
-  // ---- Projects ----
-  projects: () => request<(Project & { promptCount: number })[]>("/projects").then((v) => asArray<Project & { promptCount: number }>(v)),
-  createProject: (body: { name: string; description?: string; color?: string; visibility?: string }) =>
-    request<Project>("/projects", { method: "POST", body: JSON.stringify(body) }),
-  updateProject: (id: string, body: Partial<Project>) =>
-    request(`/projects/${id}`, { method: "PUT", body: JSON.stringify(body) }),
-  deleteProject: (id: string) =>
-    request(`/projects/${id}`, { method: "DELETE" }),
-  projectPrompts: (id: string) => request<Prompt[]>(`/projects/${id}/prompts`).then((v) => asArray<Prompt>(v)),
+  // ---- Favorites (mock, localStorage) ----
+  favorites: (_collectionId?: string) => {
+    const ids = JSON.parse(localStorage.getItem("ph_favorites") || "[]");
+    return loadAllPrompts().then((all) => all.filter((p) => ids.includes(p.id)));
+  },
+  favoriteIds: () => Promise.resolve(JSON.parse(localStorage.getItem("ph_favorites") || "[]")),
+  toggleFavorite: (promptId: string) => {
+    const ids: string[] = JSON.parse(localStorage.getItem("ph_favorites") || "[]");
+    const idx = ids.indexOf(promptId);
+    if (idx >= 0) ids.splice(idx, 1);
+    else ids.push(promptId);
+    localStorage.setItem("ph_favorites", JSON.stringify(ids));
+    return Promise.resolve({ favorited: idx < 0 });
+  },
+  moveFavorite: (_promptId: string, _collectionId?: string) => Promise.resolve(),
+  collections: () => Promise.resolve([] as (Collection & { count: number })[]),
+  createCollection: (_name: string, _icon?: string) => Promise.resolve({} as Collection),
+  deleteCollection: (_id: string) => Promise.resolve(),
 
-  // ---- User data ----
-  myHistory: () => request<CopyHistory[]>("/user/history").then((v) => asArray<CopyHistory>(v)),
-  clearHistory: () => request("/user/history", { method: "DELETE" }),
-  myPrompts: (projectId?: string) =>
-    request<Prompt[]>(`/user/prompts${projectId ? `?projectId=${projectId}` : ""}`).then((v) => asArray<Prompt>(v)),
-  createMyPrompt: (body: Record<string, unknown>) =>
-    request<Prompt>("/user/prompts", { method: "POST", body: JSON.stringify(body) }),
-  updateMyPrompt: (id: string, body: Record<string, unknown>) =>
-    request(`/user/prompts/${id}`, { method: "PUT", body: JSON.stringify(body) }),
-  deleteMyPrompt: (id: string) =>
-    request(`/user/prompts/${id}`, { method: "DELETE" }),
-  compare: (ids: string[]) => request<Prompt[]>(`/user/compare?ids=${ids.join(",")}`).then((v) => asArray<Prompt>(v)),
+  // ---- Projects (mock) ----
+  projects: () => Promise.resolve([] as (Project & { promptCount: number })[]),
+  createProject: (_body: { name: string; description?: string; color?: string; visibility?: string }) => Promise.resolve({} as Project),
+  updateProject: (_id: string, _body: Partial<Project>) => Promise.resolve(),
+  deleteProject: (_id: string) => Promise.resolve(),
+  projectPrompts: (_id: string) => Promise.resolve([] as Prompt[]),
 
-  // ---- Submissions & subscriptions ----
-  submit: (body: Record<string, unknown>) =>
-    request<Submission>("/submissions", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-  mySubmissions: () => request<Submission[]>("/submissions/me").then((v) => asArray<Submission>(v)),
-  subscribe: (email: string) =>
-    request("/subscriptions", { method: "POST", body: JSON.stringify({ email }) }),
+  // ---- User data (mock) ----
+  myHistory: () => Promise.resolve([] as CopyHistory[]),
+  clearHistory: () => Promise.resolve(),
+  myPrompts: (_projectId?: string) => Promise.resolve([] as Prompt[]),
+  createMyPrompt: (_body: Record<string, unknown>) => Promise.resolve({} as Prompt),
+  updateMyPrompt: (_id: string, _body: Record<string, unknown>) => Promise.resolve(),
+  deleteMyPrompt: (_id: string) => Promise.resolve(),
+  compare: (ids: string[]) => loadAllPrompts().then((all) => all.filter((p) => ids.includes(p.id))),
 
-  // ---- Admin ----
-  adminStats: () =>
-    request<{
-      total: number;
-      pendingSubmissions: number;
-      totalViews: number;
-      totalCopies: number;
-      byType: Record<string, number>;
-      recent: { id: string; title: string; createdAt: string; type: string }[];
-    }>("/admin/stats"),
-  reviewQueue: () => request<Submission[]>("/admin/review").then((v) => asArray<Submission>(v)),
-  review: (id: string, action: "approve" | "reject", note?: string) =>
-    request("/admin/review", {
-      method: "POST",
-      body: JSON.stringify({ id, action, note }),
-    }),
-  adminPrompts: () => request<Prompt[]>("/admin/prompts").then((v) => asArray<Prompt>(v)),
-  adminSources: () => request<DataSource[]>("/admin/sources"),
-  adminJobs: () => request<JobLog[]>("/admin/jobs"),
-  toggleSource: (id: string, enabled: boolean) =>
-    request(`/admin/sources/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ enabled }),
-    }),
-  toggleFeatured: (id: string, isFeatured: boolean) =>
-    request(`/admin/prompts/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ isFeatured }),
-    }),
-  deletePrompt: (id: string) =>
-    request(`/admin/prompts/${id}`, { method: "DELETE" }),
-  triggerJob: (id: string) =>
-    request(`/admin/jobs/${id}/trigger`, { method: "POST" }),
+  // ---- Submissions & subscriptions (mock) ----
+  submit: (_body: Record<string, unknown>) => Promise.resolve({} as Submission),
+  mySubmissions: () => Promise.resolve([] as Submission[]),
+  subscribe: (_email: string) => Promise.resolve(),
+
+  // ---- Admin (mock) ----
+  adminStats: async () => {
+    const all = await loadAllPrompts();
+    const stats = await loadJSON<Stats>("/data/stats.json");
+    return {
+      total: all.length,
+      pendingSubmissions: 0,
+      totalViews: all.reduce((s, p) => s + (p.viewCount || 0), 0),
+      totalCopies: all.reduce((s, p) => s + (p.copyCount || 0), 0),
+      byType: {
+        image: all.filter((p) => p.type === "image").length,
+        video: all.filter((p) => p.type === "video").length,
+        task: all.filter((p) => p.type === "task").length,
+      },
+      recent: all.slice(0, 10).map((p) => ({ id: p.id, title: p.title, createdAt: p.createdAt, type: p.type })),
+      ...(stats || {}),
+    };
+  },
+  reviewQueue: () => Promise.resolve([] as Submission[]),
+  review: (_id: string, _action: "approve" | "reject", _note?: string) => Promise.resolve(),
+  adminPrompts: () => loadAllPrompts(),
+  adminSources: () => Promise.resolve([] as DataSource[]),
+  adminJobs: () => Promise.resolve([] as JobLog[]),
+  toggleSource: (_id: string, _enabled: boolean) => Promise.resolve(),
+  toggleFeatured: (_id: string, _isFeatured: boolean) => Promise.resolve(),
+  deletePrompt: (_id: string) => Promise.resolve(),
+  triggerJob: (_id: string) => Promise.resolve(),
 };

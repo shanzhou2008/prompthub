@@ -18,10 +18,9 @@ interface Props {
 function buildImageUrl(prompt: Props["prompt"], size: "card" | "detail"): string {
   const raw = size === "detail" ? (prompt.imageLgUrl || prompt.imageUrl) : (prompt.imageUrl || prompt.imageLgUrl);
   if (!raw) return "";
-  // 本地图片直接使用
-  if (raw.startsWith("/images/")) return raw;
-  // Pollinations URL → 通过 Vercel 代理
-  return `/api/img?id=${encodeURIComponent(prompt.id)}&size=${size}`;
+  // 本地图片和 Pexels CDN 图片直接使用
+  if (raw.startsWith("/images/") || raw.startsWith("http")) return raw;
+  return raw;
 }
 
 export function PromptArt({
